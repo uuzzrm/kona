@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "name": "quality-gate-failing-example",
+  "description": "An intentionally failing assertion to demonstrate a stop condition.",
+  "cwd": ".",
+  "command": ["python", "quality_gate_task.py"],
+  "timeout": 30,
+  "observations": ["QUALITY_REPORT.txt"],
+  "assertions": [
+    {"type": "exit_code", "equals": 0},
+    {"type": "stdout_contains", "value": "this marker is deliberately absent"}
+  ]
+}

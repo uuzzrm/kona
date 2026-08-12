@@ -21,6 +21,9 @@ from .redaction import redact_argv, redact_text
 SCHEMA_VERSION = 1
 DEFAULT_TIMEOUT_SECONDS = 300.0
 STREAM_NAMES = ("stdout", "stderr")
+MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+CAPTURE_CHUNK_CHARS = 64 * 1024
+STREAM_TRUNCATION_MARKER = "\n[kona] stream truncated at the local capture limit\n"
 
 
 def _timestamp() -> str:
@@ -86,16 +89,35 @@ def _capture_stream(
     destination: TextIO,
     console: TextIO,
     quiet: bool,
-    result: dict[str, int],
+    result: dict[str, int | bool],
 ) -> None:
-    for line in iter(stream.readline, ""):
-        redacted = redact_text(line)
-        destination.write(redacted.text)
-        destination.flush()
-        result["count"] += redacted.count
-        if not quiet:
-            console.write(redacted.text)
-            console.flush()
+    marker_bytes = len(STREAM_TRUNCATION_MARKER.encode("utf-8"))
+    payload_limit = MAX_CAPTURE_BYTES - marker_bytes
+    while True:
+        chunk = stream.read(CAPTURE_CHUNK_CHARS)
+        if not chunk:
+            break
+        redacted = redact_text(chunk)
+        result["count"] = int(result["count"]) + redacted.count
+        if not bool(result["truncated"]):
+            encoded = redacted.text.encode("utf-8")
+            remaining = payload_limit - int(result["bytes"])
+            if len(encoded) <= remaining:
+                destination.write(redacted.text)
+                destination.flush()
+                result["bytes"] = int(result["bytes"]) + len(encoded)
+                if not quiet:
+                    console.write(redacted.text)
+                    console.flush()
+            else:
+                prefix = encoded[: max(0, remaining)].decode("utf-8", errors="ignore")
+                destination.write(prefix + STREAM_TRUNCATION_MARKER)
+                destination.flush()
+                result["bytes"] = int(result["bytes"]) + len(prefix.encode("utf-8")) + marker_bytes
+                result["truncated"] = True
+                if not quiet:
+                    console.write(prefix + STREAM_TRUNCATION_MARKER)
+                    console.flush()
     stream.close()
     destination.close()
 
@@ -137,7 +159,10 @@ def run_capture(
     started_clock = time.monotonic()
     stdout_path = run_dir / "stdout.log"
     stderr_path = run_dir / "stderr.log"
-    stream_counts = {"stdout": {"count": 0}, "stderr": {"count": 0}}
+    stream_counts: dict[str, dict[str, int | bool]] = {
+        "stdout": {"count": 0, "bytes": 0, "truncated": False},
+        "stderr": {"count": 0, "bytes": 0, "truncated": False},
+    }
     timed_out = False
     spawn_error: str | None = None
     exit_code: int
@@ -169,6 +194,7 @@ def run_capture(
         redacted_error = redact_text(spawn_error)
         stdout_path.write_text("", encoding="utf-8")
         stderr_path.write_text(redacted_error.text + "\n", encoding="utf-8")
+        stream_counts["stderr"]["bytes"] = len((redacted_error.text + "\n").encode("utf-8"))
         if not quiet:
             sys.stderr.write(redacted_error.text + "\n")
             sys.stderr.flush()
@@ -235,6 +261,17 @@ def run_capture(
             "stdout": stream_counts["stdout"]["count"],
             "stderr": stream_counts["stderr"]["count"],
         },
+        "capture": {
+            "max_bytes": MAX_CAPTURE_BYTES,
+            "stdout": {
+                "bytes": stream_counts["stdout"]["bytes"],
+                "truncated": stream_counts["stdout"]["truncated"],
+            },
+            "stderr": {
+                "bytes": stream_counts["stderr"]["bytes"],
+                "truncated": stream_counts["stderr"]["truncated"],
+            },
+        },
         "artifacts": {
             "stdout": _file_metadata(stdout_path),
             "stderr": _file_metadata(stderr_path),
@@ -247,19 +284,26 @@ def run_capture(
 def load_manifest(path: Path) -> tuple[Path, dict[str, object]]:
     """Load a run manifest from either a run directory or its run.json file."""
 
-    path = path.expanduser().resolve()
+    path = path.expanduser()
+    if path.is_symlink():
+        raise ValueError(f"run path cannot be a symlink: {path}")
     manifest_path = path / "run.json" if path.is_dir() else path
     if manifest_path.name != "run.json":
         raise ValueError("expected a run directory or a run.json file")
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError(f"run manifest must be a regular file: {manifest_path}")
+    run_dir = manifest_path.parent
+    if run_dir.is_symlink():
+        raise ValueError(f"run directory cannot be a symlink: {run_dir}")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except FileNotFoundError as error:
         raise ValueError(f"run manifest not found: {manifest_path}") from error
-    except json.JSONDecodeError as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError(f"invalid run manifest: {manifest_path}") from error
     if not isinstance(manifest, dict) or manifest.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("unsupported or malformed run manifest")
-    return manifest_path.parent, manifest
+    return run_dir, manifest
 
 
 def inspect_run(path: Path) -> dict[str, object]:
@@ -273,15 +317,16 @@ def inspect_run(path: Path) -> dict[str, object]:
         raise ValueError("run manifest has no valid artifacts section")
     for name in STREAM_NAMES:
         metadata = artifacts.get(name)
-        if not isinstance(metadata, dict) or not isinstance(metadata.get("path"), str):
+        expected_filename = f"{name}.log"
+        if not isinstance(metadata, dict) or metadata.get("path") != expected_filename:
             raise ValueError(f"run manifest has no valid {name} artifact")
-        raw_artifact_path = run_dir / metadata["path"]
+        raw_artifact_path = run_dir / expected_filename
         if raw_artifact_path.is_symlink():
             raise ValueError(f"run manifest points {name} through a symlink")
         artifact_path = raw_artifact_path.resolve()
         if artifact_path.parent != run_dir.resolve():
             raise ValueError(f"run manifest points {name} outside its run directory")
-        observed: dict[str, object] = {"path": str(artifact_path), "exists": artifact_path.is_file()}
+        observed: dict[str, object] = {"path": expected_filename, "exists": artifact_path.is_file()}
         if artifact_path.is_file():
             actual = _file_metadata(artifact_path)
             observed.update(

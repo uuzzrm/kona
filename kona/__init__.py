@@ -1,3 +1,3 @@
-"""Kona: a transparent local hop for bounded Agent-run evidence."""
+"""Kona: local acceptance gates and evidence packages for AI Agent work."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
