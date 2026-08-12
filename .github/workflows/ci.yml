@@ -31,6 +31,7 @@ jobs:
       - name: Build wheel
         run: python -m pip wheel . --no-deps --wheel-dir dist
       - name: Build source distribution
-        run: python -m pip download --no-deps --no-binary=:all: --dest dist .
+        run: |
+          python -m pip download --no-deps --no-binary=:all: --dest dist .
       - name: Verify installed wheel
         run: python scripts/verify_distribution.py
