@@ -33,8 +33,8 @@ cannot produce a passing result.
 All paths must use `/`, cannot contain `..`, cannot be absolute (including
 Windows drive or UNC paths), and cannot traverse an existing symlink. Unknown
 top-level fields are rejected so a typo cannot silently weaken a gate. File
-content checks are bounded to 4 MiB and use UTF-8 with replacement for invalid
-bytes.
+content checks are bounded to 4 MiB and stream checks can read the full 8 MiB
+capture limit; both use UTF-8 with replacement for invalid bytes.
 
 The contract directory is the workspace root by design. Kona does not discover
 a repository root from the current shell or Git metadata. Put a contract at
@@ -55,7 +55,8 @@ change; `file_unchanged` requires it not to change. For an observed directory,
 the metadata includes a bounded recursive tree hash and entry count; symlinks
 inside the tree are recorded as opaque entries and are never followed. A
 missing content input is reported as unavailable and fails both content
-assertion forms.
+assertion forms. `file_sha256` applies only to a regular file; directory tree
+hashes are used for directory lifecycle assertions, not file hash assertions.
 
 ## Exit codes
 

@@ -22,6 +22,7 @@ CONTRACT_SCHEMA_VERSION = 1
 REPORT_SCHEMA_VERSION = 2
 REPORT_SHA256_NAME = "report.sha256"
 MAX_ASSERTION_READ_BYTES = 4 * 1024 * 1024
+MAX_STREAM_ASSERTION_READ_BYTES = 8 * 1024 * 1024
 MAX_DIRECTORY_ENTRIES = 10_000
 DEFAULT_CONTRACT_TIMEOUT_SECONDS = 300.0
 CONTRACT_TEMPLATE = {
@@ -408,11 +409,11 @@ def snapshot_workspace(workspace: Path, paths: Sequence[str]) -> dict[str, dict[
     return {relative: _snapshot_one(workspace, relative) for relative in paths}
 
 
-def _read_text_limited(path: Path) -> str:
+def _read_text_limited(path: Path, *, limit: int = MAX_ASSERTION_READ_BYTES) -> str:
     if not path.is_file():
         return ""
-    if path.stat().st_size > MAX_ASSERTION_READ_BYTES:
-        raise ContractError(f"assertion input is larger than {MAX_ASSERTION_READ_BYTES} bytes: {path.name}")
+    if path.stat().st_size > limit:
+        raise ContractError(f"assertion input is larger than {limit} bytes: {path.name}")
     return path.read_text(encoding="utf-8", errors="replace")
 
 
@@ -476,7 +477,9 @@ def evaluate_assertions(
     }
     for stream_name in needed_streams:
         try:
-            stream_text[stream_name] = _read_text_limited(run_dir / f"{stream_name}.log")
+            stream_text[stream_name] = _read_text_limited(
+                run_dir / f"{stream_name}.log", limit=MAX_STREAM_ASSERTION_READ_BYTES
+            )
         except ContractError as error:
             stream_errors[stream_name] = str(error)
     results: list[dict[str, Any]] = []
@@ -528,9 +531,10 @@ def evaluate_assertions(
             results.append(_assertion_result(assertion, passed, expected, observed, f"file lifecycle matched for {relative}" if passed else f"file lifecycle did not match for {relative}", assertion_index))
         elif assertion_type == "file_sha256":
             expected = assertion["equals"].lower()
-            observed = after_item["sha256"]
+            observed = after_item["sha256"] if after_item["kind"] == "file" else None
             passed = observed == expected
-            results.append(_assertion_result(assertion, passed, expected, observed, f"file hash matched for {relative}" if passed else f"file hash did not match for {relative}", assertion_index))
+            reason = f"file hash matched for {relative}" if passed else f"file hash requires a regular file: {relative}"
+            results.append(_assertion_result(assertion, passed, expected, observed, reason, assertion_index))
         else:
             if after_item["kind"] != "file":
                 results.append(_assertion_result(assertion, False, assertion["value"], "unavailable", f"observed path is not a regular file: {relative}", assertion_index))
@@ -674,6 +678,7 @@ def run_contract(
     all_passed = (
         contract_stable
         and bool(process_integrity["integrity"]["valid"])
+        and manifest["status"] != "timed_out"
         and passed_assertions == len(assertion_results)
     )
     report: dict[str, Any] = {
@@ -829,7 +834,14 @@ def inspect_contract_report(path: Path) -> dict[str, Any]:
         and summary.get("failed_assertions") == len(assertion_results) - passed_assertions
         and summary.get("status") in {"passed", "failed"}
         and summary.get("status")
-        == ("passed" if passed_assertions == len(assertion_results) and contract_integrity.get("stable") and process_report["integrity"]["valid"] else "failed")
+        == (
+            "passed"
+            if passed_assertions == len(assertion_results)
+            and contract_integrity.get("stable")
+            and process_report["integrity"]["valid"]
+            and report["run"].get("status") != "timed_out"
+            else "failed"
+        )
     )
     stored_process_integrity = report["integrity"].get("run_artifacts")
     stored_process_matches = stored_process_integrity == process_report["integrity"]

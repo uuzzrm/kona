@@ -109,9 +109,10 @@ Each contract run creates a normal Kona run plus:
 
 Declared workspace files and directories are represented by before/after
 metadata and SHA-256 tree hashes. Their contents and directory entry names are
-not copied into the report. Content assertions read a bounded maximum of 4 MiB
-and record only whether the check passed. Kona does not enumerate or claim a
-full unobserved workspace diff; declare the paths that matter.
+not copied into the report. File content assertions read a bounded maximum of
+4 MiB, while stream assertions can read the full 8 MiB capture limit; both
+record only whether the check passed. Kona does not enumerate or claim a full
+unobserved workspace diff; declare the paths that matter.
 
 Captured streams are capped at 8 MiB per stream. If a noisy command reaches the
 limit, Kona records a truncation marker and marks the stream in `run.json`.
@@ -126,7 +127,7 @@ limit, Kona records a truncation marker and marks the stream in `run.json`.
 | `stderr_contains` / `stderr_not_contains` | Search captured stderr. |
 | `file_exists` | Require a regular file after the run. |
 | `file_content_contains` / `file_content_not_contains` | Search a bounded UTF-8 file. |
-| `file_sha256` | Compare the final file hash. |
+| `file_sha256` | Compare the final regular-file hash. |
 | `file_changed` / `file_unchanged` | Compare declared file metadata before and after. |
 | `file_created` / `file_deleted` | Check regular-file lifecycle transitions. |
 

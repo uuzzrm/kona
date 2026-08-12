@@ -273,7 +273,7 @@ class ContractTests(unittest.TestCase):
                 ],
             )
             timeout_report, timeout_code = run_contract(timeout_contract, output_root=root / "timeout-runs", quiet=True)
-            self.assertEqual(timeout_code, 0)
+            self.assertEqual(timeout_code, 1)
             self.assertEqual(timeout_report["run"]["status"], "timed_out")
 
             mutation_contract = self._write_contract(
@@ -288,6 +288,32 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(mutation_code, 1)
             self.assertFalse(mutation_report["contract_integrity"]["stable"])
             self.assertEqual(mutation_report["summary"]["status"], "failed")
+
+    def test_stream_assertions_can_read_the_full_capture_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            marker = "stream-end-marker"
+            contract_path = self._write_contract(
+                root,
+                command=[sys.executable, "-c", f"print('x' * 5000000 + '{marker}')"],
+                assertions=[{"type": "stdout_contains", "value": marker}],
+            )
+            report, exit_code = run_contract(contract_path, output_root=root / "runs", quiet=True)
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(report["assertions"][1]["passed"])
+
+    def test_file_hash_assertion_rejects_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "artifact"
+            directory.mkdir()
+            contract_path = self._write_contract(
+                root,
+                assertions=[{"type": "file_sha256", "path": "artifact", "equals": "0" * 64}],
+            )
+            report, exit_code = run_contract(contract_path, output_root=root / "runs", quiet=True)
+            self.assertEqual(exit_code, 1)
+            self.assertFalse(report["assertions"][1]["passed"])
 
     def test_explicit_null_timeout_is_unbounded(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
