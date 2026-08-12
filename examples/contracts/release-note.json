@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "name": "release-note",
+  "description": "Generate a release note and verify its observable handoff.",
+  "cwd": ".",
+  "command": [
+    "python",
+    "release_note_task.py"
+  ],
+  "timeout": 30,
+  "observations": [
+    "RELEASE.md"
+  ],
+  "assertions": [
+    {
+      "type": "exit_code",
+      "equals": 0
+    },
+    {
+      "type": "status",
+      "equals": "success"
+    },
+    {
+      "type": "file_exists",
+      "path": "RELEASE.md"
+    },
+    {
+      "type": "file_content_contains",
+      "path": "RELEASE.md",
+      "value": "## Highlights"
+    },
+    {
+      "type": "stdout_contains",
+      "value": "release note written"
+    }
+  ]
+}

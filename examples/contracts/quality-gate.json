@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "quality-gate",
+  "description": "Run a small local quality gate and verify its handoff artifact.",
+  "cwd": ".",
+  "command": ["python", "quality_gate_task.py"],
+  "timeout": 30,
+  "observations": ["QUALITY_REPORT.txt"],
+  "assertions": [
+    {"type": "exit_code", "equals": 0},
+    {"type": "file_created", "path": "QUALITY_REPORT.txt"},
+    {"type": "file_content_contains", "path": "QUALITY_REPORT.txt", "value": "quality gate: passed"},
+    {"type": "stdout_contains", "value": "quality gate passed"}
+  ]
+}
