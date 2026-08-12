@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capture Agent Runs with Kona"
+  short_description: "Record redacted, bounded evidence from local Agent commands"
+  default_prompt: "Use $kona-capture to run this local Agent command with a redacted evidence capture and a clear stop condition."
