@@ -13,14 +13,21 @@ from .authoring import AuthoringRequest, author_contract, list_templates
 from .contract import ContractError, init_contract, inspect_contract_report, load_contract, run_contract
 from .explanation import explain_contract, render_contract_explanation
 from .redaction import redact_argv, redact_text
+from .scanner import ScanError, ScanPolicy, render_scan_report, scan_repository, threshold_exit_code
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kona",
-        description="Capture bounded, redacted evidence from a local Agent command.",
+        description="Kona Guard: offline repository security inspection and verifiable Agent evidence. Start with: kona scan .",
     )
-    commands = parser.add_subparsers(dest="subcommand", required=True)
+    commands = parser.add_subparsers(dest="subcommand")
+
+    scan = commands.add_parser("scan", help="inspect a repository for deterministic Agent security risks")
+    scan.add_argument("path", nargs="?", type=Path, default=Path("."), help="repository directory (default: current directory)")
+    scan.add_argument("--format", choices=("text", "json"), default="text")
+    scan.add_argument("--output", type=Path, help="write the rendered report without overwriting")
+    scan.add_argument("--fail-on", choices=("critical", "high", "medium", "low", "info"), default="high")
 
     run = commands.add_parser("run", help="run a command and capture its output")
     run.add_argument("--output", type=Path, default=Path(".kona/runs"), help="directory for run folders")
@@ -114,6 +121,74 @@ def _run(args: argparse.Namespace) -> int:
     )
     print(f"[kona] evidence={args.output.expanduser().resolve() / str(manifest['run_id'])}", file=sys.stderr)
     return exit_code
+
+
+def _scan(args: argparse.Namespace) -> int:
+    try:
+        report = scan_repository(args.path, ScanPolicy())
+        rendered = render_scan_report(report, format=args.format)
+        if args.output is not None:
+            output = args.output.expanduser()
+            if output.exists() or output.is_symlink():
+                raise ScanError(f"refusing to overwrite scan report: {args.output}")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with output.open("x", encoding="utf-8", newline="\n") as handle:
+                handle.write(rendered)
+        print(rendered, end="")
+        return threshold_exit_code(report, args.fail_on)
+    except (ScanError, OSError, ValueError) as error:
+        print(f"kona scan: {redact_text(str(error)).text}", file=sys.stderr)
+        return 2
+
+
+def _control_center() -> int:
+    """Run the dependency-free TTY adapter over the same scanner interface."""
+
+    last_report: dict[str, object] | None = None
+    last_status = 0
+    while True:
+        print(
+            "\nKona Guard — Project Security Inspector\n"
+            "Mode: deterministic, offline, read-only\n"
+            "AI provider: not configured (network off)\n\n"
+            "  1  Scan this project\n"
+            "  2  Review last scan\n"
+            "  3  Export last scan as JSON\n"
+            "  4  Show contract templates\n"
+            "  q  Quit\n"
+        )
+        try:
+            choice = input("Select: ").strip().casefold()
+        except EOFError:
+            return 0
+        if choice == "q":
+            return last_status
+        if choice == "1":
+            try:
+                last_report = scan_repository(Path("."), ScanPolicy())
+                print(render_scan_report(last_report), end="")
+                last_status = threshold_exit_code(last_report, "high")
+                print(f"Control-center exit status is now {last_status}.")
+            except (ScanError, OSError, ValueError) as error:
+                print(f"Scan failed: {redact_text(str(error)).text}", file=sys.stderr)
+                last_status = 2
+        elif choice == "2":
+            print(render_scan_report(last_report), end="") if last_report else print("No scan has been run in this session.")
+        elif choice == "3":
+            if last_report is None:
+                print("No scan has been run in this session.")
+            else:
+                output = Path("kona-findings.json")
+                if output.exists() or output.is_symlink():
+                    print(f"Refusing to overwrite {output}.")
+                else:
+                    output.write_text(render_scan_report(last_report, format="json"), encoding="utf-8", newline="\n")
+                    print(f"Wrote {output.resolve()}")
+        elif choice == "4":
+            for item in list_templates():
+                print(f"  {item.name}: {item.description}")
+        else:
+            print("Unknown selection.")
 
 
 def _inspect(args: argparse.Namespace) -> int:
@@ -302,8 +377,19 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(raw_argv)
     if authored_command is not None:
         args.command = authored_command
+    if args.subcommand is None:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            try:
+                return _control_center()
+            except KeyboardInterrupt:
+                print("", file=sys.stderr)
+                return 130
+        _build_parser().print_help()
+        return 0
     if args.subcommand == "run":
         return _run(args)
+    if args.subcommand == "scan":
+        return _scan(args)
     if args.subcommand == "inspect":
         return _inspect(args)
     if args.subcommand == "contract":

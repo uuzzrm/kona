@@ -1,6 +1,97 @@
-# Kona
+# Kona Guard
 
-> Local acceptance gates and evidence packages for AI Agent work.
+> Offline security inspection and verifiable evidence for AI-assisted repositories.
+
+Before giving an AI coding Agent access to a repository, run one command:
+
+```bash
+kona scan .
+```
+
+Install the verified Python package, then invoke the `kona` console command:
+
+```bash
+python -m pip install kona-local-hop
+kona --help
+```
+
+**Kona Guard** is the product name, `kona-local-hop` is the current Python
+distribution name, and `kona` is the CLI. The GitHub repository remains
+`uuzzrm/kona` so existing stars, Action references, and release history keep
+working.
+
+Kona Guard deterministically checks exposed credential shapes, unsafe GitHub
+Actions configuration, risky Agent instructions, and dependency-integrity
+gaps. It runs offline, reads files without executing project code, never
+follows links, and emits redacted text or JSON findings with stable rule IDs.
+
+```text
+repository -> bounded read-only scan -> redacted findings -> CI decision
+                                                |
+                                                v
+                                      acceptance contract
+                                                |
+                                                v
+                                  verified evidence bundle
+```
+
+The scanner answers “did these enabled checks find a concrete risk?” It does
+not claim that a clean scan proves the repository has no vulnerabilities.
+Optional AI explanations are a separate future layer and will never determine
+the scan result.
+
+## Scan a project
+
+```bash
+kona scan .
+kona scan . --format json --output kona-findings.json
+kona scan . --fail-on medium
+```
+
+Example:
+
+```text
+Kona Project Scan
+Mode: deterministic, offline, read-only
+
+MEDIUM   CFG003  Mutable Action reference
+         .github/workflows/ci.yml:18
+         A third-party Action is not pinned to a full commit SHA.
+         Fix: Pin the Action to a reviewed 40-character commit SHA.
+
+Summary
+  files examined: 47
+  findings: 0 critical, 0 high, 1 medium, 0 low, 0 info
+  scan complete: yes
+```
+
+Exit codes are automation-friendly: `0` means the complete scan found nothing
+at the selected threshold, `1` means the threshold was reached, and `2` means
+Kona could not produce a trustworthy complete scan. Use `kona` without
+arguments in a real terminal for the control center; redirected stdin/stdout
+shows help and never waits for menu input.
+
+### Enabled rules
+
+| Rule | What it establishes |
+| --- | --- |
+| `SEC001` | Private-key material is present. |
+| `SEC002` | A recognized provider credential shape is present. |
+| `SEC003` | A convincing hard-coded credential assignment is present. |
+| `CFG001` | A GitHub workflow requests `write-all`. |
+| `CFG002` | A workflow uses the privileged `pull_request_target` event. |
+| `CFG003` | A third-party Action uses a mutable reference. |
+| `AGT001` | An Agent instruction asks to expose or transmit credentials. |
+| `AGT002` | An Agent instruction asks to bypass a safeguard. |
+| `DEP001` | A dependency-bearing package root lacks a recognized lockfile. |
+| `DEP002` | A remote Python requirement is not pinned immutably. |
+
+The scanner is bounded by entry, depth, file-size, and total-byte limits. An
+unsafe link, changing file, unreadable entry, special file, or exceeded limit
+fails closed instead of producing a misleading clean result. Secret evidence
+is replaced before persistence; scanner reports contain no matched secret.
+
+## Verify Agent work
 
 AI Agents can produce a green process exit code while still changing the
 wrong file, omitting a required section, or leaving a reviewer with no clear
