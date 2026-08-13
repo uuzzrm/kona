@@ -28,6 +28,7 @@ cannot produce a passing result.
 | `command` | yes | Non-empty argv array. Kona never joins it into a shell command. |
 | `timeout` | no | Non-negative seconds; `null` or `0` means unbounded. Default is 300 seconds. |
 | `observations` | no | Relative files or paths whose metadata is snapshotted before and after. |
+| `workspace_policy` | no | Optional fail-closed policy for all filesystem changes attributable to the command. |
 | `assertions` | no | Ordered checks. If no process check is present, `exit_code == 0` is added implicitly. |
 
 All paths must use `/`, cannot contain `..`, cannot be absolute (including
@@ -40,6 +41,57 @@ The contract directory is the workspace root by design. Kona does not discover
 a repository root from the current shell or Git metadata. Put a contract at
 the repository root when its command needs repository-root paths, or keep the
 command and observations relative to the contract directory.
+
+## Workspace change policy
+
+`workspace_policy` closes the gap between declared observations and the full
+set of filesystem changes caused by the authorized command:
+
+```json
+{
+  "workspace_policy": {
+    "mode": "filesystem",
+    "allow": ["src/**", "tests/**", "docs/agent-output.md"],
+    "deny": [".github/**", "**/.env", "pyproject.toml"],
+    "max_changed_paths": 50
+  }
+}
+```
+
+`mode` must be `filesystem`. Patterns are workspace-relative globs written
+with `/` separators. They must not be absolute, contain `..`, or use `\`.
+`allow` identifies paths the command may change. A changed path that matches no
+allow pattern is unexpected. `deny` takes precedence when a path matches both
+lists. Empty arrays are valid: an empty `allow` permits no attributable
+workspace changes, while an empty `deny` adds no explicit exclusions.
+`max_changed_paths` bounds the normalized set of created, modified, deleted,
+and renamed paths.
+
+Kona establishes a baseline immediately before starting the command and a
+final snapshot after the command has stopped. Policy evaluation concerns the
+delta between those states, not whether the workspace was clean before the
+run. A path already dirty at baseline is not attributed to the command merely
+because it was dirty; if the command changes that path again, the new state is
+attributable and must satisfy the policy. A rename is represented as removal of
+the old path plus creation of the new path unless the filesystem adapter can
+establish a stronger identity without weakening portability.
+
+The selected evidence output directory for the current run is excluded from
+workspace policy discovery. This exclusion is narrow: it covers only Kona's
+own artifacts for that run and does not exempt a general `.kona/**` tree or an
+output path modified by the child command. Excluded evidence paths are named in
+the report so the omission is reviewable.
+
+The policy fails closed. If Kona cannot take a complete baseline or final
+snapshot, encounters an unsafe path or symlink traversal, reaches a filesystem
+scan budget, or observes more than `max_changed_paths`, the run is unable to be
+safely evaluated and exits with code `2`. It must not truncate the change set
+and then report success.
+
+Workspace change evidence records normalized paths, lifecycle classifications,
+bounded metadata, and hashes needed for comparison. It does not copy changed
+file contents into the evidence package. Content assertions remain explicit,
+bounded checks and record only their result.
 
 ## Assertion semantics
 

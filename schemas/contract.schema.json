@@ -25,6 +25,7 @@
       "items": {"$ref": "#/$defs/relativePath"},
       "uniqueItems": true
     },
+    "workspace_policy": {"$ref": "#/$defs/workspacePolicy"},
     "assertions": {
       "type": "array",
       "items": {"$ref": "#/$defs/assertion"}
@@ -35,6 +36,22 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^(?!/)(?![A-Za-z]:)(?!\\\\)(?!.*\\\\)(?!.*(^|/)\\.\\.(/|$)).+$"
+    },
+    "workspaceGlob": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!\\\\)(?!.*\\\\)(?!.*(^|/)\\.\\.(/|$)).+$"
+    },
+    "workspacePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "allow", "deny", "max_changed_paths"],
+      "properties": {
+        "mode": {"const": "filesystem"},
+        "allow": {"type": "array", "items": {"$ref": "#/$defs/workspaceGlob"}, "uniqueItems": true},
+        "deny": {"type": "array", "items": {"$ref": "#/$defs/workspaceGlob"}, "uniqueItems": true},
+        "max_changed_paths": {"type": "integer", "minimum": 1, "maximum": 10000}
+      }
     },
     "assertion": {
       "type": "object",

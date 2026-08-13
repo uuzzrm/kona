@@ -12,10 +12,12 @@ from pathlib import Path, PurePath, PureWindowsPath
 import platform
 import re
 import sys
+import secrets
 from typing import Any, Sequence
 
 from .capture import _file_metadata, _quote_argument, inspect_run, run_capture
 from .redaction import redact_argv, redact_text
+from .workspace import DEFAULT_MAX_CHANGED_PATHS, WorkspacePolicy, WorkspacePolicyError, evaluate_workspace_policy, snapshot_workspace as snapshot_policy_workspace
 
 
 CONTRACT_SCHEMA_VERSION = 1
@@ -59,7 +61,7 @@ FILE_ASSERTIONS = {
 SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 SURROGATE_PATTERN = re.compile(r"[\ud800-\udfff]")
 CONTRACT_FIELDS = frozenset(
-    {"version", "name", "description", "cwd", "command", "timeout", "observations", "assertions"}
+    {"version", "name", "description", "cwd", "command", "timeout", "observations", "assertions", "workspace_policy"}
 )
 ASSERTION_FIELDS = frozenset({"type", "equals", "path", "value"})
 
@@ -104,7 +106,23 @@ class ContractSpec:
     timeout: float | None
     observations: list[str]
     assertions: list[dict[str, Any]]
+    workspace_policy: WorkspacePolicy | None
     contract_sha256: str
+
+def _validate_workspace_policy(value: Any) -> WorkspacePolicy | None:
+    if value is None: return None
+    if not isinstance(value, dict): raise ContractError('workspace_policy must be an object')
+    unknown=sorted(set(value)-{'mode','allow','deny','max_changed_paths'})
+    if unknown: raise ContractError(f"workspace_policy contains unsupported fields: {', '.join(unknown)}")
+    if value.get('mode','filesystem')!='filesystem': raise ContractError('workspace_policy.mode must be filesystem')
+    def get_patterns(field: str) -> tuple[str,...]:
+        raw=value.get(field,[])
+        if not isinstance(raw,list) or not all(isinstance(x,str) and x for x in raw): raise ContractError(f'workspace_policy.{field} must be an array of non-empty glob strings')
+        if any('\\' in x or x.startswith('/') or '..' in x.split('/') for x in raw): raise ContractError(f'workspace_policy.{field} contains an unsafe glob')
+        return tuple(raw)
+    maximum=value.get('max_changed_paths',DEFAULT_MAX_CHANGED_PATHS)
+    if isinstance(maximum,bool) or not isinstance(maximum,int) or not 1<=maximum<=10000: raise ContractError('workspace_policy.max_changed_paths must be an integer from 1 to 10000')
+    return WorkspacePolicy('filesystem',get_patterns('allow'),get_patterns('deny'),maximum)
 
 
 def _utc_timestamp() -> str:
@@ -337,6 +355,7 @@ def load_contract(path: Path) -> ContractSpec:
     if not isinstance(raw_assertions, list):
         raise ContractError("assertions must be an array")
     assertions = [_validate_assertion(value, index) for index, value in enumerate(raw_assertions)]
+    workspace_policy = _validate_workspace_policy(raw.get("workspace_policy"))
     has_process_assertion = any(item["type"] in {"exit_code", "status"} for item in assertions)
     if not has_process_assertion:
         assertions.insert(0, {"type": "exit_code", "equals": 0, "implicit": True})
@@ -355,6 +374,7 @@ def load_contract(path: Path) -> ContractSpec:
         timeout=timeout,
         observations=all_observations,
         assertions=assertions,
+        workspace_policy=workspace_policy,
         contract_sha256=_sha256_file(contract_path),
     )
 
@@ -656,6 +676,13 @@ def run_contract(
 
     spec = load_contract(contract_path)
     before = snapshot_workspace(spec.workspace, spec.observations)
+    output_absolute = output_root.expanduser().resolve()
+    output_absolute.mkdir(parents=True, exist_ok=True)
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + secrets.token_hex(3)
+    run_dir = output_absolute / run_id
+    run_dir.mkdir()
+    try: policy_before = snapshot_policy_workspace(spec.workspace, excluded_roots=[run_dir]) if spec.workspace_policy else None
+    except WorkspacePolicyError as error: raise ContractError(str(error)) from error
     manifest, _child_exit_code = run_capture(
         spec.command,
         output_root=output_root,
@@ -663,10 +690,15 @@ def run_contract(
         timeout=spec.timeout,
         label=spec.name,
         quiet=quiet,
+        run_id=run_id,
     )
     output_root = output_root.expanduser().resolve()
     run_dir = output_root / str(manifest["run_id"])
     after = snapshot_workspace(spec.workspace, spec.observations)
+    try:
+        policy_after = snapshot_policy_workspace(spec.workspace, excluded_roots=[run_dir]) if spec.workspace_policy else None
+        workspace_policy_result = evaluate_workspace_policy(spec.workspace_policy, policy_before or {}, policy_after or {}) if spec.workspace_policy else None
+    except WorkspacePolicyError as error: raise ContractError(str(error)) from error
     assertion_results = evaluate_assertions(spec, manifest, run_dir, before, after)
     try:
         contract_after_sha256 = None if spec.path.is_symlink() or not spec.path.is_file() else _sha256_file(spec.path)
@@ -680,6 +712,7 @@ def run_contract(
         and bool(process_integrity["integrity"]["valid"])
         and manifest["status"] != "timed_out"
         and passed_assertions == len(assertion_results)
+        and (workspace_policy_result is None or workspace_policy_result["valid"])
     )
     report: dict[str, Any] = {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -707,6 +740,7 @@ def run_contract(
             }
             for relative in spec.observations
         ],
+        "workspace_policy": ({**workspace_policy_result, "excluded": [str(run_dir)]} if workspace_policy_result else None),
         "integrity": {
             "run_artifacts": process_integrity["integrity"],
             "workspace": {"valid": True, "checked": len(spec.observations)},
@@ -762,7 +796,19 @@ def _inspect_workspace_observations(report: dict[str, Any]) -> dict[str, Any]:
         relative: {"matches": current[relative] == after, "expected": after, "current": current[relative]}
         for relative, after in expected.items()
     }
-    return {"valid": all(item["matches"] for item in details.values()), "checked": len(details), "paths": details}
+    policy = report.get("workspace_policy")
+    policy_valid = True
+    if isinstance(policy, dict):
+        recorded_after = policy.get("after")
+        if not isinstance(recorded_after, dict):
+            policy_valid = False
+        else:
+            try:
+                current = snapshot_policy_workspace(workspace)
+                policy_valid = all(current.get(path, {"kind": "missing"}) == metadata for path, metadata in recorded_after.items())
+            except (WorkspacePolicyError, OSError):
+                policy_valid = False
+    return {"valid": all(item["matches"] for item in details.values()) and policy_valid, "checked": len(details), "paths": details, "workspace_policy": {"valid": policy_valid}}
 
 
 def inspect_contract_report(path: Path) -> dict[str, Any]:

@@ -55,6 +55,12 @@ uses an argv array, never a shell string:
   "cwd": ".",
   "command": ["python", "examples/contracts/release_note_task.py"],
   "timeout": 60,
+  "workspace_policy": {
+    "mode": "filesystem",
+    "allow": ["examples/contracts/RELEASE.md"],
+    "deny": [".github/**", "**/.env", "pyproject.toml"],
+    "max_changed_paths": 10
+  },
   "observations": ["examples/contracts/RELEASE.md"],
   "assertions": [
     {"type": "exit_code", "equals": 0},
@@ -111,8 +117,17 @@ Declared workspace files and directories are represented by before/after
 metadata and SHA-256 tree hashes. Their contents and directory entry names are
 not copied into the report. File content assertions read a bounded maximum of
 4 MiB, while stream assertions can read the full 8 MiB capture limit; both
-record only whether the check passed. Kona does not enumerate or claim a full
-unobserved workspace diff; declare the paths that matter.
+record only whether the check passed.
+
+An optional `workspace_policy` discovers the bounded set of filesystem changes
+made between the pre-command baseline and final snapshot. `allow` declares the
+permitted path globs, `deny` overrides them, and `max_changed_paths` prevents an
+unbounded result. Existing dirty paths are preserved as baseline state; if the
+command changes one again, that new change is evaluated. Kona excludes only its
+selected evidence output for the current run. An incomplete scan, unsafe path,
+or exceeded limit fails closed instead of producing a partial green report.
+Reports contain changed paths, lifecycle classifications, metadata, and hashes,
+not copies of changed file contents.
 
 Captured streams are capped at 8 MiB per stream. If a noisy command reaches the
 limit, Kona records a truncation marker and marks the stream in `run.json`.
@@ -140,6 +155,9 @@ check. A missing file is unavailable evidence, not a successful
 - Commands are executed from an argv array with no implicit shell.
 - `cwd` and observed paths must be relative, use `/` separators, remain under
   the contract directory, and cannot traverse symlinks.
+- Workspace policy globs follow the same relative-path rules. Denied or
+  unexpected changes fail the contract; incomplete discovery is an evaluation
+  error rather than a warning.
 - The contract is hashed before and after execution; a changed or deleted
   contract fails the run.
 - Common token, password, Bearer, GitHub, OpenAI, Slack, and AWS credential
@@ -173,13 +191,20 @@ claims from a report.
 
 ## Example
 
-The repository contains a complete release-note workflow:
+The repository contains a release-note workflow and a realistic coding-Agent
+policy example:
 
 ```bash
 python -m kona contract validate examples/contracts/release-note.json
 python -m kona contract run examples/contracts/release-note.json --output .kona/runs --quiet
 python -m kona contract inspect .kona/runs/<run-id>
 ```
+
+See [`examples/contracts/coding-agent.json`](examples/contracts/coding-agent.json)
+for a contract that permits source, test, and documentation edits while
+protecting CI, packaging, secrets, and repository policy files. It documents
+the accepted interface and is not runnable until workspace policy is
+implemented.
 
 See [`examples/contracts/README.md`](examples/contracts/README.md) for what the
 example proves and what it deliberately leaves to a semantic review.

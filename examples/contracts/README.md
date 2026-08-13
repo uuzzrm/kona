@@ -16,6 +16,12 @@ The examples represent different handoff states:
 - `quality-gate-failing.json` is expected to return exit code `1`. The command
   succeeds, but the contract's required marker is absent. That is a stop
   condition for an Agent, not a success story.
+- `coding-agent.json` is a realistic repository-root template for running a
+  coding-Agent verification command while permitting only source, test, and
+  documentation changes. It protects CI, packaging, secrets, and Agent policy
+  files. Copy it to the repository root before use so paths are scoped to that
+  repository; the checked-in file documents the interface and is not runnable
+  until workspace policy is implemented.
 
 Run from the repository root:
 
@@ -28,6 +34,11 @@ python -m kona contract inspect .kona/runs/<run-id>
 The example intentionally observes one generated file and stores only its
 metadata and hash in the report. It does not claim that the release note is
 good writing; add a separate review or test for that semantic question.
+
+The coding-Agent policy allows an existing dirty workspace. Kona records the
+pre-command baseline and evaluates only additional changes made while the
+authorized command runs. Deny patterns override allow patterns, and exceeding
+the change limit or failing to complete discovery is an evaluation error.
 
 To run the intentional failure:
 

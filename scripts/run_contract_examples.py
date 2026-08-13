@@ -17,6 +17,7 @@ EXAMPLE_FILES = (
     "quality-gate.json",
     "quality-gate-failing.json",
     "quality_gate_task.py",
+    "coding-agent.json",
 )
 
 
@@ -60,7 +61,7 @@ def _run_example(workspace: Path, contract_name: str, expected_run_code: int, re
         cwd=workspace,
         env=env,
     )
-    if inspected.returncode != 0:
+    if inspected.returncode != expected_run_code:
         raise RuntimeError(f"inspection failed for {contract_name}: {inspected.stderr}")
     inspection = json.loads(inspected.stdout)
     if inspection["integrity"]["valid"] is not True:

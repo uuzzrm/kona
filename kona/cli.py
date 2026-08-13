@@ -179,7 +179,7 @@ def _contract_inspect(args: argparse.Namespace) -> int:
         return 2
     if args.as_json:
         print(json.dumps(inspected, indent=2, ensure_ascii=False))
-        return 0 if inspected["integrity"]["valid"] else 1
+        return 0 if inspected["integrity"]["valid"] and inspected["report"]["summary"]["status"] == "passed" else 1
     report = inspected["report"]
     summary = report["summary"]
     integrity = inspected["integrity"]
@@ -189,7 +189,7 @@ def _contract_inspect(args: argparse.Namespace) -> int:
     print(f"  process artifacts: {'PASS' if integrity['run_artifacts']['valid'] else 'FAIL'}")
     print(f"  report markdown: {'PASS' if integrity['report_markdown']['valid'] else 'FAIL'}")
     print(f"  report digest: {'PASS' if integrity['report_digest']['valid'] else 'FAIL'}")
-    return 0 if integrity["valid"] else 1
+    return 0 if integrity["valid"] and summary["status"] == "passed" else 1
 
 
 def main(argv: list[str] | None = None) -> int:

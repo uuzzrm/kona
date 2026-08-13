@@ -539,6 +539,45 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(ContractError):
                 init_contract(path)
 
+    def test_workspace_policy_allows_created_modified_and_deleted_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); (root / "allowed").mkdir()
+            (root / "allowed/modified.txt").write_text("before", encoding="utf-8")
+            (root / "allowed/deleted.txt").write_text("before", encoding="utf-8")
+            contract = self._write_contract(root, command=[sys.executable, "-c", "from pathlib import Path; Path('allowed/created.txt').write_text('x'); Path('allowed/modified.txt').write_text('after'); Path('allowed/deleted.txt').unlink()"], workspace_policy={"mode":"filesystem","allow":["allowed/**"],"deny":[],"max_changed_paths":10})
+            report, code = run_contract(contract, output_root=root / ".kona/runs", quiet=True)
+            self.assertEqual(code, 0); self.assertTrue(report["workspace_policy"]["valid"])
+            self.assertEqual(report["workspace_policy"]["created"], ["allowed/created.txt"])
+            self.assertEqual(report["workspace_policy"]["modified"], ["allowed/modified.txt"])
+            self.assertEqual(report["workspace_policy"]["deleted"], ["allowed/deleted.txt"])
+
+    def test_workspace_policy_denies_and_rejects_unexpected_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); (root / "protected").mkdir(); (root / "protected/x").write_text("a")
+            contract = self._write_contract(root, command=[sys.executable,"-c","from pathlib import Path; Path('protected/x').write_text('b'); Path('surprise').write_text('x')"], workspace_policy={"mode":"filesystem","allow":["protected/**"],"deny":["protected/**"],"max_changed_paths":10})
+            report, code = run_contract(contract, output_root=root / ".kona/runs", quiet=True)
+            self.assertEqual(code, 1); self.assertEqual(report["workspace_policy"]["denied"],["protected/x"]); self.assertEqual(report["workspace_policy"]["unexpected"],["surprise"])
+
+    def test_workspace_policy_change_limit_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary); contract=self._write_contract(root, command=[sys.executable,"-c","from pathlib import Path; Path('a').write_text('a'); Path('b').write_text('b')"], workspace_policy={"mode":"filesystem","allow":["*"],"deny":[],"max_changed_paths":1})
+            with self.assertRaisesRegex(ContractError, "workspace changed 2 paths"):
+                run_contract(contract, output_root=root / ".kona/runs", quiet=True)
+
+    def test_workspace_policy_inspect_detects_later_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary); contract=self._write_contract(root, command=[sys.executable,"-c","from pathlib import Path; Path('result').write_text('ok')"], workspace_policy={"mode":"filesystem","allow":["result"],"deny":[],"max_changed_paths":10})
+            report, code=run_contract(contract, output_root=root / ".kona/runs", quiet=True); self.assertEqual(code,0)
+            (root / "result").write_text("tampered")
+            inspected=inspect_contract_report(root / ".kona/runs" / report["run"]["run_id"])
+            self.assertFalse(inspected["integrity"]["valid"])
+
+    def test_workspace_policy_detects_empty_directory_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary); contract=self._write_contract(root, command=[sys.executable,"-c","from pathlib import Path; Path('empty').mkdir()"], workspace_policy={"mode":"filesystem","allow":[],"deny":[],"max_changed_paths":10})
+            report, code=run_contract(contract, output_root=root / ".kona/runs", quiet=True)
+            self.assertEqual(code,1); self.assertEqual(report["workspace_policy"]["unexpected"],["empty"])
+
 
 class CliTests(unittest.TestCase):
     def test_module_cli_returns_child_status_and_inspects(self) -> None:

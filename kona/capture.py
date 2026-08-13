@@ -136,6 +136,7 @@ def run_capture(
     timeout: float | None = DEFAULT_TIMEOUT_SECONDS,
     label: str | None = None,
     quiet: bool = False,
+    run_id: str | None = None,
 ) -> tuple[dict[str, object], int]:
     """Run a command, tee redacted text streams, and write a JSON run manifest."""
 
@@ -146,9 +147,10 @@ def run_capture(
 
     output_root = output_root.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + secrets.token_hex(3)
+    supplied_run_id = run_id is not None
+    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + secrets.token_hex(3)
     run_dir = output_root / run_id
-    run_dir.mkdir()
+    run_dir.mkdir(exist_ok=supplied_run_id)
 
     safe_argv, display_command, command_redactions = _safe_display_command(command)
     safe_label, label_redactions = "", 0
