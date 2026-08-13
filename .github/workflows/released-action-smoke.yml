@@ -1,0 +1,28 @@
+name: Released Action smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  released-action:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run published Kona major tag
+        id: kona
+        uses: uuzzrm/kona@v0
+        with:
+          contract: examples/contracts/action-smoke.json
+          artifact-name: kona-v0-smoke-${{ matrix.os }}
+          retention-days: "1"
+      - name: Require published Action outputs
+        shell: bash
+        run: |
+          test "${{ steps.kona.outputs.outcome }}" = "passed"
+          test "${{ steps.kona.outputs.accepted }}" = "true"
