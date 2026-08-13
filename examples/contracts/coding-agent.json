@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "name": "coding-agent-verification",
+  "description": "Run the repository verification suite and reject command-attributable changes outside the approved coding scope.",
+  "cwd": ".",
+  "command": ["python", "-m", "unittest", "discover", "-s", "tests", "-v"],
+  "timeout": 300,
+  "workspace_policy": {
+    "mode": "filesystem",
+    "allow": ["src/**", "tests/**", "docs/**"],
+    "deny": [
+      ".github/**",
+      "**/.env",
+      "**/.env.*",
+      "AGENTS.md",
+      "pyproject.toml",
+      "schemas/**"
+    ],
+    "max_changed_paths": 50
+  },
+  "observations": ["src", "tests", "docs"],
+  "assertions": [
+    {"type": "exit_code", "equals": 0},
+    {"type": "status", "equals": "success"},
+    {"type": "stderr_not_contains", "value": "FAILED"}
+  ]
+}
