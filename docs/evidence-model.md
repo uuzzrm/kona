@@ -46,6 +46,62 @@ checks, not used to imply they happened.
 The protocol is designed for Agent stop conditions: a failed local check is a
 reason to investigate, not a reason to narrate success.
 
+## Portable bundle workflow
+
+ADR 0003 accepts a second, offline handoff workflow for Evidence Bundle v1:
+
+```text
+completed run
+-> create canonical logical bundle
+-> serialize deterministic ZIP when needed
+-> copy or upload
+-> verify offline
+-> interpret valid, accepted, and authenticated separately
+```
+
+This workflow is implemented in Kona 0.4.0. The
+bundle contains the exact contract bytes used for the run, `run.json`, both
+redacted stream artifacts, `report.json`, `report.md`, and an authoritative
+manifest. The normal directory is the canonical logical form; deterministic
+ZIP is only its transport serialization.
+
+Offline verification may use only bundle bytes and supported schema rules. It
+must not consult the original contract path, `run.cwd`, workspace, repository,
+network, clock, or environment. It verifies artifact sizes and SHA-256
+digests, contract identity, report and stream consistency, assertion summary,
+and the recorded acceptance semantics.
+
+Verification reports three independent properties:
+
+| Property | Meaning in Bundle v1 |
+| --- | --- |
+| `valid` | The input is safe, complete, supported, and internally consistent. |
+| `accepted` | A valid bundle records that the contract outcome passed. |
+| `authenticated` | Producer identity was cryptographically authenticated; always `false` in v1. |
+
+A valid bundle can record rejection. Automation therefore returns `0` for
+valid and accepted, `1` for valid but rejected, and `2` for unsafe, malformed,
+unsupported, inconsistent, over-limit, or unverifiable input.
+
+Bundle readers treat ZIPs and directories as hostile input. Unsafe paths,
+normalization collisions, duplicate or unexpected entries, links and special
+files, unsupported compression, excessive expansion, limit violations, and
+unstable reads fail closed. The exact finite limits are part of the Bundle v1
+implementation contract and are enforced by the verifier.
+
+Portability does not widen the evidence claim. Observed workspace contents are
+not copied into the bundle. Verification confirms the integrity and internal
+consistency of recorded metadata and digests; it does not reconstruct the
+workspace, replay the command, authenticate a producer, provide a signature or
+attestation, prove semantic correctness, or establish remote or human
+acceptance.
+
+Bundle v1 is unsigned. It detects corruption, partial edits, unsafe input, and
+internal contradictions, but not a party that rewrites every artifact and
+recomputes every digest. Producer identity and resistance to coordinated
+whole-bundle rewriting require a future signing and trust-policy layer;
+verification therefore reports `authenticated: false`.
+
 ## Workspace policy evidence boundary
 
 The filesystem policy compares two bounded workspace states. Existing dirty
