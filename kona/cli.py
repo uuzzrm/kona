@@ -293,7 +293,15 @@ def _bundle_verify(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    authored_command: list[str] | None = None
+    if len(raw_argv) >= 2 and raw_argv[:2] == ["contract", "init"] and "--" in raw_argv:
+        separator = raw_argv.index("--")
+        authored_command = raw_argv[separator + 1 :]
+        raw_argv = raw_argv[:separator]
+    args = _build_parser().parse_args(raw_argv)
+    if authored_command is not None:
+        args.command = authored_command
     if args.subcommand == "run":
         return _run(args)
     if args.subcommand == "inspect":
