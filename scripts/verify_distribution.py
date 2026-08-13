@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
         names = set(archive.namelist())
     if "kona/contract.py" not in names:
         raise RuntimeError(f"wheel does not contain runtime contract module: {wheel.name}")
-    runtime_modules = ("kona/workspace.py", "kona/bundle.py", "kona/github.py", "kona/authoring.py", "kona/explanation.py", "kona/scanner.py")
+    runtime_modules = ("kona/workspace.py", "kona/bundle.py", "kona/github.py", "kona/authoring.py", "kona/explanation.py", "kona/scanner.py", "kona/providers.py")
     if any(module not in names for module in runtime_modules):
         raise RuntimeError(f"wheel does not contain all runtime modules: {wheel.name}")
     source_archives = sorted(distribution.glob(f"kona_local_hop-{__version__}.tar.gz"))
@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run([str(installed_python), "-m", "kona", "--help"], cwd=temporary, env=environment, check=True)
         subprocess.run([str(installed_python), "-m", "kona", "contract", "templates", "--json"], cwd=temporary, env=environment, check=True)
         subprocess.run([str(installed_python), "-m", "kona", "scan", ".", "--format", "json"], cwd=temporary, env=environment, check=True)
+        subprocess.run([str(installed_python), "-m", "kona", "explain", ".", "--provider", "deepseek", "--model", "deepseek-v4-pro", "--preview"], cwd=temporary, env=environment, check=True)
         subprocess.run(
             [str(installed_python), "-c", f"import kona; assert kona.__version__ == '{__version__}'"],
             cwd=temporary,

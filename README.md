@@ -40,6 +40,49 @@ not claim that a clean scan proves the repository has no vulnerabilities.
 Optional AI explanations are a separate future layer and will never determine
 the scan result.
 
+## Optional AI explanation
+
+Kona can ask DeepSeek or Anthropic to explain the deterministic findings. This
+is an explicit network action, never part of `kona scan`, and never changes a
+rule ID, severity, verdict, or exit code. First inspect the exact payload:
+
+```bash
+kona explain . --provider deepseek --model deepseek-v4-pro --preview
+```
+
+The payload contains only the finding rule, severity, category, fixed message,
+remediation, and aggregate counts. It excludes source, paths, line numbers,
+evidence previews, repository metadata, and environment variables. To send it:
+
+```bash
+export DEEPSEEK_API_KEY="..."
+kona explain . --provider deepseek --model deepseek-v4-pro --yes
+
+export ANTHROPIC_API_KEY="..."
+kona explain . --provider anthropic --model YOUR_MODEL --yes
+```
+
+PowerShell uses `$env:DEEPSEEK_API_KEY = "..."`; Command Prompt uses
+`set DEEPSEEK_API_KEY=...`. Replace the variable name for Anthropic.
+
+Keys are never accepted as command-line values or written to reports. Running
+`kona` interactively also offers a hidden, session-only key prompt. Provider
+output is untrusted advisory text: Kona strips terminal control sequences and
+does not execute suggestions. Official endpoints are the only send targets in
+this release. Custom Base URL syntax can be validated, but sending is blocked
+until a DNS-rebinding-safe transport exists.
+
+Provider calls are intentionally single-attempt and bounded to 30 seconds by
+default. Kona does not automatically spend more quota after rate limits or
+transient failures; rerun only after reviewing the provider status.
+
+API contracts were checked against the official
+[DeepSeek Chat Completions reference](https://api-docs.deepseek.com/api/create-chat-completion),
+[Anthropic Messages reference](https://platform.claude.com/docs/en/api/messages),
+and [Anthropic API errors](https://platform.claude.com/docs/en/api/errors) on
+2026-08-12. Both APIs require an explicit model; Kona does not claim a provider
+default.
+
 ## Scan a project
 
 ```bash
