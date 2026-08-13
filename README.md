@@ -99,6 +99,26 @@ The inspect step checks the captured stream artifacts, Markdown report, report
 digest, and report summary semantics. A failed inspection is a stop condition;
 do not recreate the run and overwrite the evidence silently.
 
+### 4. Portable handoff (accepted design, not yet implemented)
+
+Evidence Bundle v1 will turn a completed run into a deterministic `.kona.zip`
+that can be copied and verified without the original workspace:
+
+```text
+kona bundle create .kona/runs/<run-id> --output task.kona.zip
+kona bundle verify task.kona.zip --json
+```
+
+The canonical bundle is a logical directory containing the exact contract
+bytes, run and report artifacts, redacted streams, and an authoritative digest
+manifest. Verification is offline and separates three results: byte-and-
+semantic `valid`, the recorded contract `accepted`, and producer
+`authenticated`. Bundle v1 is unsigned, so `authenticated` is always false.
+It does not include observed workspace contents, replay the command, or claim
+that a digest authenticates its producer. See
+[`ADR 0003`](docs/decisions/0003-portable-evidence-bundle.md) for the accepted
+interface and security limits.
+
 ## Evidence package
 
 Each contract run creates a normal Kona run plus:
@@ -183,11 +203,18 @@ that a human approved the result.
 | `schemas/` | Editor-facing JSON Schema for contract authors. |
 | `examples/contracts/` | Reproducible end-to-end examples. |
 | `skills/kona-capture/` | Portable Agent instructions and stop conditions. |
-| `docs/` | Contract semantics, evidence model, and architecture decisions. |
+| `docs/contract-spec.md` | Contract authoring and evaluation semantics. |
+| `docs/evidence-model.md` | Evidence claims, handoff workflows, and trust boundaries. |
+| `docs/decisions/` | Accepted architecture and public-interface decisions. |
+| `docs/research/` | Dated primary-source research behind product decisions. |
 
 Read [`docs/contract-spec.md`](docs/contract-spec.md) before authoring a
 contract and [`docs/evidence-model.md`](docs/evidence-model.md) before making
 claims from a report.
+
+The local workflow is `validate -> run -> inspect`. Kona 0.4.0 adds the
+portable workflow `bundle create -> copy/upload -> bundle verify` after a run,
+without consulting the source workspace at the destination.
 
 ## Example
 

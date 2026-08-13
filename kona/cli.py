@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from .capture import DEFAULT_TIMEOUT_SECONDS, inspect_run, run_capture
+from .bundle import BundleError, create_bundle, verify_bundle
 from .contract import ContractError, init_contract, inspect_contract_report, load_contract, run_contract
 from .redaction import redact_argv, redact_text
 
@@ -54,6 +55,15 @@ def _build_parser() -> argparse.ArgumentParser:
     contract_inspect = contract_commands.add_parser("inspect", help="verify a contract evidence report")
     contract_inspect.add_argument("report", type=Path, help="contract run directory or report.json")
     contract_inspect.add_argument("--json", action="store_true", dest="as_json", help="print machine-readable JSON")
+
+    bundle = commands.add_parser("bundle", help="create and verify portable evidence bundles")
+    bundle_commands = bundle.add_subparsers(dest="bundle_subcommand", required=True)
+    bundle_create = bundle_commands.add_parser("create", help="create a deterministic portable evidence bundle")
+    bundle_create.add_argument("run", type=Path, help="contract run directory or report.json")
+    bundle_create.add_argument("--output", type=Path, required=True, help="new bundle directory or .zip path")
+    bundle_verify = bundle_commands.add_parser("verify", help="verify a bundle offline")
+    bundle_verify.add_argument("bundle", type=Path, help="bundle directory or .zip path")
+    bundle_verify.add_argument("--json", action="store_true", dest="as_json", help="print machine-readable JSON")
     return parser
 
 
@@ -192,6 +202,29 @@ def _contract_inspect(args: argparse.Namespace) -> int:
     return 0 if integrity["valid"] and summary["status"] == "passed" else 1
 
 
+def _bundle_create(args: argparse.Namespace) -> int:
+    try:
+        manifest = create_bundle(args.run, args.output)
+    except (BundleError, OSError, ValueError) as error:
+        print(f"kona bundle create: {redact_text(str(error)).text}", file=sys.stderr)
+        return 2
+    print(f"[kona] bundle={args.output.expanduser().resolve()} run={manifest['run_id']}")
+    return 0
+
+
+def _bundle_verify(args: argparse.Namespace) -> int:
+    try:
+        result = verify_bundle(args.bundle)
+    except (BundleError, OSError, ValueError) as error:
+        print(f"kona bundle verify: {redact_text(str(error)).text}", file=sys.stderr)
+        return 2
+    if args.as_json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print(f"valid: yes\naccepted: {'yes' if result['accepted'] else 'no'}\nauthenticated: no")
+    return 0 if result["accepted"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.subcommand == "run":
@@ -207,4 +240,9 @@ def main(argv: list[str] | None = None) -> int:
             return _contract_run(args)
         if args.contract_subcommand == "inspect":
             return _contract_inspect(args)
+    if args.subcommand == "bundle":
+        if args.bundle_subcommand == "create":
+            return _bundle_create(args)
+        if args.bundle_subcommand == "verify":
+            return _bundle_verify(args)
     return 2

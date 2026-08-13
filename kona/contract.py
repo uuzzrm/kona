@@ -752,7 +752,7 @@ def run_contract(
         ],
     }
     report_markdown_path = run_dir / "report.md"
-    report_markdown_path.write_text(_render_report_markdown(report), encoding="utf-8")
+    report_markdown_path.write_bytes(_render_report_markdown(report).encode("utf-8"))
     report["integrity"]["report_markdown"] = _report_artifact(report_markdown_path)
     report_json_path = run_dir / "report.json"
     temporary = report_json_path.with_suffix(".json.tmp")
@@ -760,6 +760,7 @@ def run_contract(
     temporary.replace(report_json_path)
     report_digest = _sha256_file(report_json_path)
     (run_dir / REPORT_SHA256_NAME).write_text(f"{report_digest}  report.json\n", encoding="ascii")
+    (run_dir / "contract.json").write_bytes(spec.path.read_bytes())
     return report, 0 if all_passed else 1
 
 

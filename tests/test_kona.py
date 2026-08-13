@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
+import zipfile
 
+from kona.bundle import create_bundle, verify_bundle
 from kona.capture import inspect_run, run_capture
 from kona.contract import ContractError, init_contract, inspect_contract_report, load_contract, run_contract
 from kona.redaction import RedactionResult, redact_argv, redact_text
@@ -579,6 +583,184 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(code,1); self.assertEqual(report["workspace_policy"]["unexpected"],["empty"])
 
 
+class EvidenceBundleTests(unittest.TestCase):
+    def _write_contract(self, root: Path, *, accepted: bool = True) -> Path:
+        contract = {
+            "version": 1,
+            "name": "bundle-contract",
+            "cwd": ".",
+            "command": [sys.executable, "-c", "print('portable evidence')"],
+            "assertions": [{"type": "exit_code", "equals": 0 if accepted else 9}],
+        }
+        path = root / "contract.json"
+        path.write_text(json.dumps(contract), encoding="utf-8")
+        return path
+
+    def _create_run(self, root: Path, *, accepted: bool = True) -> Path:
+        workspace = root / "workspace"
+        workspace.mkdir()
+        contract = self._write_contract(workspace, accepted=accepted)
+        report, exit_code = run_contract(contract, output_root=workspace / "runs", quiet=True)
+        self.assertEqual(exit_code, 0 if accepted else 1)
+        return workspace / "runs" / str(report["run"]["run_id"])
+
+    def _zip_entries(self, archive: Path) -> list[tuple[zipfile.ZipInfo, bytes]]:
+        with zipfile.ZipFile(archive, "r") as bundle:
+            return [(entry, bundle.read(entry)) for entry in bundle.infolist()]
+
+    def _rewrite_zip(
+        self,
+        source: Path,
+        destination: Path,
+        transform: object,
+    ) -> None:
+        entries = self._zip_entries(source)
+        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            for entry, content in entries:
+                replacement = transform(entry, content)  # type: ignore[operator]
+                if replacement is None:
+                    continue
+                new_entry, new_content = replacement
+                bundle.writestr(new_entry, new_content)
+
+    def _assert_malformed(self, bundle: Path) -> None:
+        with self.assertRaises((OSError, ValueError)):
+            verify_bundle(bundle)
+
+    def test_passing_and_failing_runs_verify_offline_after_workspace_deletion(self) -> None:
+        for accepted in (True, False):
+            with self.subTest(accepted=accepted), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                run = self._create_run(root, accepted=accepted)
+                bundle_path = root / "evidence.kona.zip"
+                create_bundle(run, bundle_path)
+                shutil.rmtree(root / "workspace")
+
+                verified = verify_bundle(bundle_path)
+
+                self.assertTrue(verified["valid"])
+                self.assertEqual(verified["accepted"], accepted)
+                self.assertFalse(verified["authenticated"])
+
+    def test_identical_run_produces_byte_for_byte_deterministic_zip(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run = self._create_run(root)
+            first = root / "first.kona.zip"
+            second = root / "second.kona.zip"
+
+            create_bundle(run, first)
+            create_bundle(run, second)
+
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+
+    def test_unpacked_directory_and_zip_have_the_same_verification_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run = self._create_run(root)
+            archive = root / "evidence.kona.zip"
+            directory = root / "unpacked"
+            create_bundle(run, archive)
+            with zipfile.ZipFile(archive, "r") as bundle:
+                bundle.extractall(directory)
+            shutil.rmtree(root / "workspace")
+
+            self.assertEqual(verify_bundle(directory), verify_bundle(archive))
+
+    def test_tampering_with_any_artifact_or_manifest_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "evidence.kona.zip"
+            create_bundle(self._create_run(root), archive)
+            entries = self._zip_entries(archive)
+
+            for target, _content in entries:
+                with self.subTest(target=target.filename):
+                    tampered = root / f"tampered-{len(target.filename)}-{entries.index((target, _content))}.zip"
+
+                    def alter(entry: zipfile.ZipInfo, content: bytes) -> tuple[zipfile.ZipInfo, bytes]:
+                        if entry.filename == target.filename:
+                            content += b"\nTAMPERED"
+                        return entry, content
+
+                    self._rewrite_zip(archive, tampered, alter)
+                    self._assert_malformed(tampered)
+
+    def test_missing_and_extra_artifacts_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "evidence.kona.zip"
+            create_bundle(self._create_run(root), archive)
+            entries = self._zip_entries(archive)
+            artifact = next(entry.filename for entry, _ in entries if entry.filename != "kona.bundle.json")
+
+            missing = root / "missing.zip"
+            self._rewrite_zip(
+                archive,
+                missing,
+                lambda entry, content: None if entry.filename == artifact else (entry, content),
+            )
+            self._assert_malformed(missing)
+
+            extra = root / "extra.zip"
+            shutil.copyfile(archive, extra)
+            with zipfile.ZipFile(extra, "a", compression=zipfile.ZIP_DEFLATED) as bundle:
+                bundle.writestr("undeclared.txt", b"not in the manifest")
+            self._assert_malformed(extra)
+
+    def test_zip_rejects_traversal_absolute_and_windows_unsafe_paths(self) -> None:
+        unsafe_paths = (
+            "../escape",
+            "/absolute",
+            r"C:\absolute",
+            r"\\server\share\artifact",
+            "CON",
+            "NUL.txt",
+            "folder/file.txt:stream",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for index, unsafe in enumerate(unsafe_paths):
+                with self.subTest(path=unsafe):
+                    archive = root / f"unsafe-{index}.zip"
+                    with zipfile.ZipFile(archive, "w") as bundle:
+                        bundle.writestr(unsafe, b"unsafe")
+                    self._assert_malformed(archive)
+
+    def test_zip_rejects_duplicate_names_and_symlink_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            duplicate = root / "duplicate.zip"
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with zipfile.ZipFile(duplicate, "w") as bundle:
+                    bundle.writestr("kona.bundle.json", b"{}")
+                    bundle.writestr("kona.bundle.json", b"{}")
+            self._assert_malformed(duplicate)
+
+            symlink = root / "symlink.zip"
+            link = zipfile.ZipInfo("report.json")
+            link.create_system = 3
+            link.external_attr = 0o120777 << 16
+            with zipfile.ZipFile(symlink, "w") as bundle:
+                bundle.writestr(link, b"../outside")
+            self._assert_malformed(symlink)
+
+    def test_zip_rejects_artifact_and_total_expansion_size_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            oversized_artifact = root / "oversized-artifact.zip"
+            with zipfile.ZipFile(oversized_artifact, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                bundle.writestr("huge.bin", b"x" * (64 * 1024 * 1024 + 1))
+            self._assert_malformed(oversized_artifact)
+
+            oversized_total = root / "oversized-total.zip"
+            with zipfile.ZipFile(oversized_total, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                for index in range(17):
+                    bundle.writestr(f"part-{index}.bin", b"x" * (8 * 1024 * 1024))
+            self._assert_malformed(oversized_total)
+
+
 class CliTests(unittest.TestCase):
     def test_module_cli_returns_child_status_and_inspects(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -690,6 +872,58 @@ class CliTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(failed_result.returncode, 1)
+
+    def test_bundle_cli_create_verify_and_exit_code_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cases = ((True, 0), (False, 1))
+            for accepted, expected_code in cases:
+                with self.subTest(accepted=accepted):
+                    workspace = root / f"workspace-{accepted}"
+                    workspace.mkdir()
+                    contract = workspace / "contract.json"
+                    contract.write_text(
+                        json.dumps(
+                            {
+                                "version": 1,
+                                "command": [sys.executable, "-c", "print('bundle cli')"],
+                                "assertions": [{"type": "exit_code", "equals": 0 if accepted else 3}],
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    report, _ = run_contract(contract, output_root=workspace / "runs", quiet=True)
+                    run = workspace / "runs" / str(report["run"]["run_id"])
+                    output = root / f"{accepted}.kona.zip"
+
+                    created = subprocess.run(
+                        [sys.executable, "-m", "kona", "bundle", "create", str(run), "--output", str(output)],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(created.returncode, 0, created.stderr)
+                    shutil.rmtree(workspace)
+                    verified = subprocess.run(
+                        [sys.executable, "-m", "kona", "bundle", "verify", str(output), "--json"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(verified.returncode, expected_code, verified.stderr)
+                    payload = json.loads(verified.stdout)
+                    self.assertTrue(payload["valid"])
+                    self.assertEqual(payload["accepted"], accepted)
+
+            malformed = root / "malformed.zip"
+            malformed.write_bytes(b"not a zip")
+            rejected = subprocess.run(
+                [sys.executable, "-m", "kona", "bundle", "verify", str(malformed), "--json"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(rejected.returncode, 2)
 
 
 if __name__ == "__main__":

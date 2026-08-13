@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         names = set(archive.namelist())
     if "kona/contract.py" not in names:
         raise RuntimeError(f"wheel does not contain runtime contract module: {wheel.name}")
-    if "kona/workspace.py" not in names:
+    if "kona/workspace.py" not in names or "kona/bundle.py" not in names:
         raise RuntimeError(f"wheel does not contain workspace policy module: {wheel.name}")
     source_archives = sorted(distribution.glob("*.tar.gz"))
     if source_archives:
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         subprocess.run([str(installed_python), "-m", "kona", "--help"], cwd=temporary, env=environment, check=True)
         subprocess.run(
-            [str(installed_python), "-c", "import kona; assert kona.__version__ == '0.3.0'"],
+            [str(installed_python), "-c", "import kona; assert kona.__version__ == '0.4.0'"],
             cwd=temporary,
             env=environment,
             check=True,
