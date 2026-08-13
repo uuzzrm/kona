@@ -20,8 +20,8 @@ The examples represent different handoff states:
   coding-Agent verification command while permitting only source, test, and
   documentation changes. It protects CI, packaging, secrets, and Agent policy
   files. Copy it to the repository root before use so paths are scoped to that
-  repository; the checked-in file documents the interface and is not runnable
-  until workspace policy is implemented.
+  repository; workspace policy is implemented, but the checked-in command and
+  paths must be deliberately adapted before use.
 
 Run from the repository root:
 

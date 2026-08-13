@@ -120,6 +120,21 @@ hashes are used for directory lifecycle assertions, not file hash assertions.
 
 ## Authoring guidance
 
+Kona can compile three explicit authoring templates into ordinary contract v1
+JSON: `read-only-check`, `coding-agent`, and `artifact-generator`. Template
+generation never scans the repository, guesses authority, or executes the
+command. Use `kona contract templates` to inspect the choices and `kona
+contract explain <path>` to review the expanded execution, change authority,
+acceptance checks, evidence, warnings, and trust limitations before running.
+
+Templates are an authoring convenience, not a second runtime format. The
+generated JSON is the entire authority and is validated by the same loader as
+a hand-written contract. Allow globs authorize deletion as well as creation
+and modification; deny globs take precedence. Explanation warnings are review
+prompts and do not silently rewrite or reject a valid contract.
+Workspace policy intentionally excludes `.git` metadata and does not sandbox
+processes, network access, or other operating-system side effects.
+
 Write assertions around the smallest observable outcome that matters. Pair a
 process assertion with an artifact assertion and, where useful, a bounded
 content marker. Do not use a broad “command succeeded” check as a substitute

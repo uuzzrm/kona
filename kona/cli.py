@@ -9,7 +9,9 @@ import sys
 
 from .capture import DEFAULT_TIMEOUT_SECONDS, inspect_run, run_capture
 from .bundle import BundleError, create_bundle, verify_bundle
+from .authoring import AuthoringRequest, author_contract, list_templates
 from .contract import ContractError, init_contract, inspect_contract_report, load_contract, run_contract
+from .explanation import explain_contract, render_contract_explanation
 from .redaction import redact_argv, redact_text
 
 
@@ -44,8 +46,25 @@ def _build_parser() -> argparse.ArgumentParser:
     contract_validate.add_argument("contract", type=Path, help="path to a JSON contract")
     contract_validate.add_argument("--json", action="store_true", dest="as_json", help="print machine-readable JSON")
 
-    contract_init = contract_commands.add_parser("init", help="write a starter contract without overwriting files")
+    contract_init = contract_commands.add_parser("init", help="write a starter or template-based contract")
     contract_init.add_argument("path", type=Path, help="new JSON contract path")
+    contract_init.add_argument("--template", choices=[item.name for item in list_templates()])
+    contract_init.add_argument("--name")
+    contract_init.add_argument("--description")
+    contract_init.add_argument("--cwd")
+    contract_init.add_argument("--timeout", type=float)
+    contract_init.add_argument("--allow", action="append", default=[])
+    contract_init.add_argument("--deny", action="append", default=[])
+    contract_init.add_argument("--observe", action="append", default=[])
+    contract_init.add_argument("--output", action="append", default=[], dest="outputs")
+    contract_init.add_argument("command", nargs="*", help="authorized argv after --")
+
+    contract_templates = contract_commands.add_parser("templates", help="list safe authoring templates")
+    contract_templates.add_argument("--json", action="store_true", dest="as_json")
+
+    contract_explain = contract_commands.add_parser("explain", help="explain authority, evidence, and risks")
+    contract_explain.add_argument("contract", type=Path)
+    contract_explain.add_argument("--json", action="store_true", dest="as_json")
 
     contract_run = contract_commands.add_parser("run", help="execute a contract and write an evidence report")
     contract_run.add_argument("contract", type=Path, help="path to a JSON contract")
@@ -156,11 +175,59 @@ def _contract_validate(args: argparse.Namespace) -> int:
 
 def _contract_init(args: argparse.Namespace) -> int:
     try:
-        path = init_contract(args.path)
+        if args.template is None:
+            if any((args.command, args.allow, args.deny, args.observe, args.outputs, args.name, args.description, args.cwd, args.timeout is not None)):
+                raise ContractError("template authoring options require --template")
+            path = init_contract(args.path)
+        else:
+            command = list(args.command)
+            if command and command[0] == "--":
+                command.pop(0)
+            path = author_contract(
+                AuthoringRequest(
+                    template=args.template,
+                    name=args.name or "my-agent-task",
+                    description=args.description,
+                    cwd=args.cwd or ".",
+                    timeout=300 if args.timeout is None else args.timeout,
+                    command=command,
+                    allow=args.allow,
+                    deny=args.deny,
+                    observations=args.observe,
+                    outputs=args.outputs,
+                ),
+                args.path,
+            )
     except (ContractError, OSError, ValueError) as error:
         print(f"kona contract init: {redact_text(str(error)).text}", file=sys.stderr)
         return 2
     print(f"[kona] starter contract={path}")
+    return 0
+
+
+def _contract_templates(args: argparse.Namespace) -> int:
+    templates = [
+        {"name": item.name, "description": item.description, "requirements": list(item.requirements)}
+        for item in list_templates()
+    ]
+    if args.as_json:
+        print(json.dumps({"templates": templates}, indent=2, ensure_ascii=False))
+    else:
+        for item in templates:
+            print(f"{item['name']}: {item['description']} (requires: {', '.join(item['requirements'])})")
+    return 0
+
+
+def _contract_explain(args: argparse.Namespace) -> int:
+    try:
+        explanation = explain_contract(args.contract)
+    except (ContractError, OSError, ValueError) as error:
+        print(f"kona contract explain: {redact_text(str(error)).text}", file=sys.stderr)
+        return 2
+    if args.as_json:
+        print(json.dumps(explanation, indent=2, ensure_ascii=False))
+    else:
+        print(render_contract_explanation(explanation), end="")
     return 0
 
 
@@ -236,6 +303,10 @@ def main(argv: list[str] | None = None) -> int:
             return _contract_validate(args)
         if args.contract_subcommand == "init":
             return _contract_init(args)
+        if args.contract_subcommand == "templates":
+            return _contract_templates(args)
+        if args.contract_subcommand == "explain":
+            return _contract_explain(args)
         if args.contract_subcommand == "run":
             return _contract_run(args)
         if args.contract_subcommand == "inspect":
