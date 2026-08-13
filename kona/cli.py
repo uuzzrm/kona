@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -14,6 +16,7 @@ from .contract import ContractError, init_contract, inspect_contract_report, loa
 from .explanation import explain_contract, render_contract_explanation
 from .redaction import redact_argv, redact_text
 from .scanner import ScanError, ScanPolicy, render_scan_report, scan_repository, threshold_exit_code
+from .providers import ProviderConfig, ProviderError, build_findings_payload, explain_findings
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -28,6 +31,16 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--format", choices=("text", "json"), default="text")
     scan.add_argument("--output", type=Path, help="write the rendered report without overwriting")
     scan.add_argument("--fail-on", choices=("critical", "high", "medium", "low", "info"), default="high")
+
+    explain = commands.add_parser("explain", help="optionally send redacted findings, never source, for advisory AI explanation")
+    explain.add_argument("path", nargs="?", type=Path, default=Path("."))
+    explain.add_argument("--provider", required=True, choices=("deepseek", "anthropic"))
+    explain.add_argument("--model")
+    explain.add_argument("--base-url")
+    explain.add_argument("--allow-custom-base-url", action="store_true")
+    explain.add_argument("--preview", action="store_true", help="print the exact findings-only payload without network access")
+    explain.add_argument("--yes", action="store_true", help="confirm sending the previewed payload")
+    explain.add_argument("--format", choices=("text", "json"), default="text")
 
     run = commands.add_parser("run", help="run a command and capture its output")
     run.add_argument("--output", type=Path, default=Path(".kona/runs"), help="directory for run folders")
@@ -141,6 +154,23 @@ def _scan(args: argparse.Namespace) -> int:
         return 2
 
 
+def _explain_scan(args: argparse.Namespace) -> int:
+    try:
+        report = scan_repository(args.path, ScanPolicy())
+        payload = build_findings_payload(report)
+        if args.preview:
+            print(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True))
+            return 0
+        if not args.yes:
+            raise ProviderError("review `kona explain --preview` first, then pass --yes to allow network access")
+        result = explain_findings(report, ProviderConfig(args.provider, args.model, args.base_url, args.allow_custom_base_url))
+        print(json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) if args.format == "json" else result["explanation"] + "\n\n" + result["notice"])
+        return 0
+    except (ScanError, ProviderError, OSError, ValueError) as error:
+        print(f"kona explain: {redact_text(str(error)).text}", file=sys.stderr)
+        return 2
+
+
 def _control_center() -> int:
     """Run the dependency-free TTY adapter over the same scanner interface."""
 
@@ -154,7 +184,8 @@ def _control_center() -> int:
             "  1  Scan this project\n"
             "  2  Review last scan\n"
             "  3  Export last scan as JSON\n"
-            "  4  Show contract templates\n"
+            "  4  Explain last scan with AI (opt-in network)\n"
+            "  5  Show contract templates\n"
             "  q  Quit\n"
         )
         try:
@@ -185,6 +216,43 @@ def _control_center() -> int:
                     output.write_text(render_scan_report(last_report, format="json"), encoding="utf-8", newline="\n")
                     print(f"Wrote {output.resolve()}")
         elif choice == "4":
+            if last_report is None:
+                print("No scan has been run in this session.")
+                continue
+            provider = input("Provider (deepseek/anthropic): ").strip().casefold()
+            if provider not in {"deepseek", "anthropic"}:
+                print("Unknown provider.")
+                continue
+            model = input("Model (required): ").strip()
+            if not model:
+                print("A model is required.")
+                continue
+            payload = build_findings_payload(last_report)
+            print("Exact data to be sent (no source, paths, or evidence):")
+            print(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True))
+            if input("Send to the official provider endpoint? [y/N]: ").strip().casefold() != "y":
+                print("Cancelled; no network request was made.")
+                continue
+            env_name = "DEEPSEEK_API_KEY" if provider == "deepseek" else "ANTHROPIC_API_KEY"
+            session_key = getpass.getpass(f"{env_name} (session only; hidden): ")
+            if not session_key:
+                print("No key entered; cancelled.")
+                continue
+            previous_key = os.environ.get(env_name)
+            try:
+                os.environ[env_name] = session_key
+                result = explain_findings(last_report, ProviderConfig(provider, model=model))
+                print(result["explanation"])
+                print(result["notice"])
+            except ProviderError as error:
+                print(f"AI explanation failed: {redact_text(str(error)).text}", file=sys.stderr)
+            finally:
+                if previous_key is None:
+                    os.environ.pop(env_name, None)
+                else:
+                    os.environ[env_name] = previous_key
+                session_key = ""
+        elif choice == "5":
             for item in list_templates():
                 print(f"  {item.name}: {item.description}")
         else:
@@ -390,6 +458,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run(args)
     if args.subcommand == "scan":
         return _scan(args)
+    if args.subcommand == "explain":
+        return _explain_scan(args)
     if args.subcommand == "inspect":
         return _inspect(args)
     if args.subcommand == "contract":
