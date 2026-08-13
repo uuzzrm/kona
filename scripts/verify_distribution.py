@@ -14,7 +14,7 @@ import zipfile
 def main(argv: list[str] | None = None) -> int:
     repo_root = Path(__file__).resolve().parents[1]
     distribution = Path(argv[0]).expanduser() if argv else repo_root / "dist"
-    wheels = sorted(distribution.glob("*.whl"))
+    wheels = sorted(distribution.glob("kona_local_hop-0.5.0-*.whl"))
     if not wheels:
         raise RuntimeError("no wheel found in dist/")
     wheel = wheels[-1]
@@ -22,13 +22,13 @@ def main(argv: list[str] | None = None) -> int:
         names = set(archive.namelist())
     if "kona/contract.py" not in names:
         raise RuntimeError(f"wheel does not contain runtime contract module: {wheel.name}")
-    if "kona/workspace.py" not in names or "kona/bundle.py" not in names:
+    if "kona/workspace.py" not in names or "kona/bundle.py" not in names or "kona/github.py" not in names:
         raise RuntimeError(f"wheel does not contain workspace policy module: {wheel.name}")
-    source_archives = sorted(distribution.glob("*.tar.gz"))
+    source_archives = sorted(distribution.glob("kona_local_hop-0.5.0.tar.gz"))
     if source_archives:
         with tarfile.open(source_archives[-1], "r:gz") as archive:
             source_names = set(archive.getnames())
-        required_assets = ("schemas/contract.schema.json", "skills/kona-capture/SKILL.md", "examples/contracts/README.md")
+        required_assets = ("schemas/contract.schema.json", "skills/kona-capture/SKILL.md", "examples/contracts/README.md", "action.yml")
         for asset in required_assets:
             if not any(name.endswith(asset) for name in source_names):
                 raise RuntimeError(f"source distribution is missing {asset}")
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         subprocess.run([str(installed_python), "-m", "kona", "--help"], cwd=temporary, env=environment, check=True)
         subprocess.run(
-            [str(installed_python), "-c", "import kona; assert kona.__version__ == '0.4.0'"],
+            [str(installed_python), "-c", "import kona; assert kona.__version__ == '0.5.0'"],
             cwd=temporary,
             env=environment,
             check=True,

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "github-action-smoke",
+  "description": "Exercise the Kona composite Action without modifying the checkout.",
+  "cwd": ".",
+  "command": ["python", "-c", "print('kona action smoke passed')"],
+  "timeout": 30,
+  "assertions": [
+    {"type": "exit_code", "equals": 0},
+    {"type": "stdout_contains", "value": "kona action smoke passed"}
+  ]
+}

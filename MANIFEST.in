@@ -1,6 +1,7 @@
 include README.md LICENSE
 recursive-include docs *.md
 recursive-include examples *.json *.md *.py
+include action.yml
 recursive-include schemas *.json
 recursive-include skills *
 recursive-include tasks *.md

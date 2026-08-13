@@ -99,9 +99,9 @@ The inspect step checks the captured stream artifacts, Markdown report, report
 digest, and report summary semantics. A failed inspection is a stop condition;
 do not recreate the run and overwrite the evidence silently.
 
-### 4. Portable handoff (accepted design, not yet implemented)
+### 4. Portable handoff
 
-Evidence Bundle v1 will turn a completed run into a deterministic `.kona.zip`
+Evidence Bundle v1 turns a completed run into a deterministic `.kona.zip`
 that can be copied and verified without the original workspace:
 
 ```text
@@ -118,6 +118,33 @@ It does not include observed workspace contents, replay the command, or claim
 that a digest authenticates its producer. See
 [`ADR 0003`](docs/decisions/0003-portable-evidence-bundle.md) for the accepted
 interface and security limits.
+
+## GitHub Actions
+
+Use Kona as a pull-request gate without assembling custom CI plumbing:
+
+```yaml
+permissions:
+  contents: read
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: uuzzrm/kona@v0
+    id: kona
+    with:
+      contract: .kona/contracts/agent-task.json
+      artifact-name: kona-agent-evidence
+```
+
+The Action runs the contract, creates and independently verifies a portable
+bundle, writes a job summary and failure annotation, uploads the bundle, then
+fails the check when the task is rejected. Outputs include `outcome`,
+`accepted`, `bundle`, and `run-id`. It requires only `contents: read`; Bundle v1
+remains unsigned and reports no producer authentication.
+
+Pin a full commit SHA instead of `v0` where your supply-chain policy requires
+immutable third-party Actions. See [ADR 0004](docs/decisions/0004-github-action-adapter.md)
+for official GitHub sources and the adapter trust boundary.
 
 ## Evidence package
 
@@ -212,7 +239,7 @@ Read [`docs/contract-spec.md`](docs/contract-spec.md) before authoring a
 contract and [`docs/evidence-model.md`](docs/evidence-model.md) before making
 claims from a report.
 
-The local workflow is `validate -> run -> inspect`. Kona 0.4.0 adds the
+The local workflow is `validate -> run -> inspect`. Kona adds the
 portable workflow `bundle create -> copy/upload -> bundle verify` after a run,
 without consulting the source workspace at the destination.
 
