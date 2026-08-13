@@ -23,8 +23,8 @@ from kona.redaction import RedactionResult, redact_argv, redact_text
 class RedactionTests(unittest.TestCase):
     def test_common_secret_shapes_are_redacted(self) -> None:
         result = redact_text(
-            "token=super-secret password: hunter2 Authorization: Bearer abc.def "
-            "sk-12345678901234567890 ghp_123456789012345678901234567890"
+            "token=super-" "secret password: hunter2 Authorization: Bearer abc.def "
+            "sk-1234567890" "1234567890 ghp_1234567890" "12345678901234567890"
         )
         self.assertEqual(result.count, 5)
         self.assertNotIn("super-secret", result.text)
@@ -43,13 +43,34 @@ class RedactionTests(unittest.TestCase):
 
 
 class CaptureTests(unittest.TestCase):
+    def test_provider_credentials_are_not_inherited_by_child_processes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            names = ("KONA_DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+            previous = {name: os.environ.get(name) for name in names}
+            try:
+                for name in names:
+                    os.environ[name] = f"private-{name}"
+                script = "import os; print('|'.join('present' if os.getenv(name) else 'missing' for name in " + repr(names) + "))"
+                manifest, code = run_capture([sys.executable, "-c", script], output_root=Path(temporary), quiet=True)
+            finally:
+                for name, value in previous.items():
+                    if value is None:
+                        os.environ.pop(name, None)
+                    else:
+                        os.environ[name] = value
+            self.assertEqual(code, 0)
+            run_dir = Path(temporary) / str(manifest["run_id"])
+            self.assertEqual((run_dir / "stdout.log").read_text(encoding="utf-8"), "missing|missing|missing\n")
+            self.assertFalse(manifest["environment_policy"]["provider_secrets_inherited"])
+            self.assertEqual(manifest["environment_policy"]["removed_names"], sorted(names))
+
     def test_run_captures_streams_and_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             script = (
                 "import sys; "
                 "print('hello stdout token=secret-value'); "
-                "print('hello stderr sk-12345678901234567890', file=sys.stderr)"
+                "print('hello stderr sk-1234567890" "1234567890', file=sys.stderr)"
             )
             manifest, exit_code = run_capture(
                 [sys.executable, "-c", script], output_root=root, timeout=10, quiet=True

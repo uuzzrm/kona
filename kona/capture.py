@@ -20,6 +20,31 @@ from .redaction import redact_argv, redact_text
 
 SCHEMA_VERSION = 1
 DEFAULT_TIMEOUT_SECONDS = 300.0
+PROVIDER_SECRET_ENV_NAMES = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "KONA_ANTHROPIC_API_KEY",
+        "KONA_DEEPSEEK_API_KEY",
+        "KONA_OPENAI_API_KEY",
+        "OPENAI_API_KEY",
+    }
+)
+
+
+def _child_environment() -> tuple[dict[str, str], list[str]]:
+    """Return the inherited environment without provider credentials."""
+
+    environment = os.environ.copy()
+    removed: list[str] = []
+    for name in sorted(PROVIDER_SECRET_ENV_NAMES):
+        if name in environment:
+            environment.pop(name)
+            removed.append(name)
+    return environment, removed
 STREAM_NAMES = ("stdout", "stderr")
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 CAPTURE_CHUNK_CHARS = 64 * 1024
@@ -171,6 +196,7 @@ def run_capture(
 
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
     start_new_session = os.name != "nt"
+    child_environment, removed_environment = _child_environment()
 
     try:
         process = subprocess.Popen(
@@ -185,6 +211,7 @@ def run_capture(
             bufsize=1,
             creationflags=creationflags,
             start_new_session=start_new_session,
+            env=child_environment,
         )
     except OSError as error:
         if isinstance(error, FileNotFoundError):
@@ -262,6 +289,10 @@ def run_capture(
             "command": command_redactions,
             "stdout": stream_counts["stdout"]["count"],
             "stderr": stream_counts["stderr"]["count"],
+        },
+        "environment_policy": {
+            "provider_secrets_inherited": False,
+            "removed_names": removed_environment,
         },
         "capture": {
             "max_bytes": MAX_CAPTURE_BYTES,
