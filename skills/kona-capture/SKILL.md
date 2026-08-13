@@ -31,6 +31,17 @@ Start a new contract without overwriting an existing file:
 python -m kona contract init task.contract.json
 ```
 
+For a scoped task, prefer compiling and then reviewing an explicit template:
+
+```text
+python -m kona contract init task.contract.json --template coding-agent --allow "src/**" --observe src -- python -m unittest
+python -m kona contract explain task.contract.json
+```
+
+Never treat a template as inferred authorization. Confirm the expanded command,
+allowed and denied paths, deletion authority, warnings, and limitations before
+execution. `contract explain --json` is the machine-readable review seam.
+
 Useful assertion combinations include:
 
 - `exit_code` or `status` for the process boundary;

@@ -12,6 +12,8 @@ import warnings
 import zipfile
 
 from kona.bundle import create_bundle, verify_bundle
+from kona.authoring import AuthoringRequest, author_contract, list_templates
+from kona.explanation import explain_contract, render_contract_explanation
 from kona.github import _summary, run_gate
 from kona.capture import inspect_run, run_capture
 from kona.contract import ContractError, init_contract, inspect_contract_report, load_contract, run_contract
@@ -544,6 +546,100 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(ContractError):
                 init_contract(path)
 
+    def test_authoring_templates_compile_to_contract_v1(self) -> None:
+        self.assertEqual([item.name for item in list_templates()], ["read-only-check", "coding-agent", "artifact-generator"])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            readonly = author_contract(AuthoringRequest("read-only-check", "tests", [sys.executable, "-c", "print('ok')"]), root / "readonly.json")
+            self.assertEqual(load_contract(readonly).workspace_policy.allow, ())
+            coding = author_contract(AuthoringRequest("coding-agent", "code", [sys.executable, "-c", "print('ok')"], allow=["src/**", "tests/**"]), root / "coding.json")
+            self.assertEqual(load_contract(coding).workspace_policy.allow, ("src/**", "tests/**"))
+            artifact = author_contract(AuthoringRequest("artifact-generator", "docs", [sys.executable, "-c", "print('ok')"], outputs=["docs/result.md"]), root / "artifact.json")
+            spec = load_contract(artifact)
+            self.assertIn("docs/result.md", spec.observations)
+            self.assertTrue(any(item["type"] == "file_exists" for item in spec.assertions))
+
+    def test_authoring_fails_closed_without_explicit_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cases = [
+                AuthoringRequest("coding-agent", "code", ["tool"]),
+                AuthoringRequest("artifact-generator", "artifact", ["tool"]),
+                AuthoringRequest("artifact-generator", "secret", ["tool"], outputs=["token.txt"]),
+                AuthoringRequest("read-only-check", "shell", "tool --unsafe"),
+            ]
+            for index, request in enumerate(cases):
+                output = root / f"{index}.json"
+                with self.assertRaises(ContractError):
+                    author_contract(request, output)
+                self.assertFalse(output.exists())
+
+    def test_authored_contracts_enforce_real_workspace_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "src").mkdir()
+            contract = author_contract(
+                AuthoringRequest(
+                    "coding-agent", "allowed", [sys.executable, "-c", "from pathlib import Path; Path('src/result.py').write_text('ok')"], allow=["src/**"]
+                ), root / "allowed.json"
+            )
+            _report, code = run_contract(contract, output_root=root / "runs-allowed", quiet=True)
+            self.assertEqual(code, 0)
+
+            for relative in (".env", "nested/AGENTS.md", "nested/pyproject.toml"):
+                with self.subTest(relative=relative):
+                    workspace = root / relative.replace("/", "-").replace(".", "_")
+                    workspace.mkdir()
+                    path = workspace / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("before", encoding="utf-8")
+                    denied = author_contract(
+                        AuthoringRequest("coding-agent", "denied", [sys.executable, "-c", f"from pathlib import Path; Path({relative!r}).write_text('after')"], allow=["**"]),
+                        workspace / "denied.json",
+                    )
+                    report, code = run_contract(denied, output_root=workspace / "runs", quiet=True)
+                    self.assertEqual(code, 1)
+                    self.assertFalse(report["workspace_policy"]["valid"])
+
+    def test_artifact_template_authorizes_new_parent_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            contract = author_contract(
+                AuthoringRequest("artifact-generator", "nested", [sys.executable, "-c", "from pathlib import Path; Path('dist/reports/result.json').parent.mkdir(parents=True); Path('dist/reports/result.json').write_text('{}')"], outputs=["dist/reports/result.json"]),
+                root / "artifact.json",
+            )
+            report, code = run_contract(contract, output_root=root / "runs", quiet=True)
+            self.assertEqual(code, 0)
+            self.assertTrue(report["workspace_policy"]["valid"])
+
+    def test_explanation_is_redacted_and_discloses_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = self._write_contract(root, command=["tool", "--token", "plain-secret"], timeout=None)
+            explanation = explain_contract(path)
+            self.assertEqual(explanation["execution"]["command"][-1], "[REDACTED]")
+            codes = {warning["code"] for warning in explanation["warnings"]}
+            self.assertIn("no-workspace-policy", codes)
+            self.assertIn("unbounded-timeout", codes)
+            self.assertFalse(explanation["limitations"]["authenticated"])
+            self.assertIn("unsigned", render_contract_explanation(explanation))
+
+    def test_explanation_redacts_secrets_across_text_and_json_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = self._write_contract(
+                root,
+                description="handoff token=description-secret",
+                command=["tool", "--token=command-secret"],
+                assertions=[{"type": "stdout_contains", "value": "token=assertion-secret"}],
+            )
+            explanation = explain_contract(path)
+            serialized = json.dumps(explanation)
+            rendered = render_contract_explanation(explanation)
+            for secret in ("description-secret", "command-secret", "assertion-secret"):
+                self.assertNotIn(secret, serialized)
+                self.assertNotIn(secret, rendered)
+
     def test_workspace_policy_allows_created_modified_and_deleted_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); (root / "allowed").mkdir()
@@ -788,6 +884,27 @@ class EvidenceBundleTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_contract_authoring_cli_templates_init_and_explain(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            templates = subprocess.run([sys.executable, "-m", "kona", "contract", "templates", "--json"], capture_output=True, text=True, check=False)
+            self.assertEqual(templates.returncode, 0, templates.stderr)
+            self.assertEqual(len(json.loads(templates.stdout)["templates"]), 3)
+            contract = root / "agent.json"
+            initialized = subprocess.run(
+                [sys.executable, "-m", "kona", "contract", "init", str(contract), "--template", "coding-agent", "--allow", "src/**", "--observe", "src", "--", sys.executable, "-c", "print('ok')"],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            explained = subprocess.run([sys.executable, "-m", "kona", "contract", "explain", str(contract), "--json"], capture_output=True, text=True, check=False)
+            self.assertEqual(explained.returncode, 0, explained.stderr)
+            self.assertEqual(json.loads(explained.stdout)["change_authority"]["allow"], ["src/**"])
+
+            rejected = root / "rejected.json"
+            failed = subprocess.run([sys.executable, "-m", "kona", "contract", "init", str(rejected), "--template", "coding-agent", "--", "tool"], capture_output=True, text=True, check=False)
+            self.assertEqual(failed.returncode, 2)
+            self.assertFalse(rejected.exists())
+
     def test_module_cli_returns_child_status_and_inspects(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -47,6 +47,26 @@ python -m kona contract validate task.contract.json
 Edit the command, observations, and assertions before running it. A contract
 uses an argv array, never a shell string:
 
+For a safer task-specific starting point, compile an explicit template. This
+does not inspect the repository, infer permission, or execute the command:
+
+```bash
+kona contract templates
+kona contract init agent-task.json --template coding-agent \
+  --name verify-agent-change \
+  --allow "src/**" --allow "tests/**" \
+  --observe src --observe tests \
+  -- python -m unittest discover -s tests -v
+kona contract explain agent-task.json
+```
+
+Built-in templates cover read-only checks, explicitly scoped coding changes,
+and declared artifact generation. `coding-agent` refuses to generate without
+an `--allow`; `artifact-generator` refuses without an `--output`. The expanded
+file is an ordinary contract v1 and remains the complete runtime authority.
+Workspace policy does not observe `.git` metadata and is not an operating-
+system, process, or network sandbox.
+
 ```json
 {
   "version": 1,
@@ -226,6 +246,8 @@ that a human approved the result.
 | --- | --- |
 | `kona/capture.py` | Bounded process execution, stream capture, and v1 manifests. |
 | `kona/contract.py` | Contract loading, workspace snapshots, assertions, and reports. |
+| `kona/authoring.py` | Deterministic, explicit contract template compiler. |
+| `kona/explanation.py` | Read-only authority, evidence, warning, and limitation view. |
 | `kona/cli.py` | Stable command-line seam for capture and contract workflows. |
 | `schemas/` | Editor-facing JSON Schema for contract authors. |
 | `examples/contracts/` | Reproducible end-to-end examples. |
@@ -257,8 +279,8 @@ python -m kona contract inspect .kona/runs/<run-id>
 See [`examples/contracts/coding-agent.json`](examples/contracts/coding-agent.json)
 for a contract that permits source, test, and documentation edits while
 protecting CI, packaging, secrets, and repository policy files. It documents
-the accepted interface and is not runnable until workspace policy is
-implemented.
+the accepted interface. Workspace policy is implemented and fail-closed;
+adapt the example command and paths to the repository before running it.
 
 See [`examples/contracts/README.md`](examples/contracts/README.md) for what the
 example proves and what it deliberately leaves to a semantic review.

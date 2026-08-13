@@ -13,8 +13,10 @@ import zipfile
 
 def main(argv: list[str] | None = None) -> int:
     repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+    from kona import __version__
     distribution = Path(argv[0]).expanduser() if argv else repo_root / "dist"
-    wheels = sorted(distribution.glob("kona_local_hop-0.5.0-*.whl"))
+    wheels = sorted(distribution.glob(f"kona_local_hop-{__version__}-*.whl"))
     if not wheels:
         raise RuntimeError("no wheel found in dist/")
     wheel = wheels[-1]
@@ -22,9 +24,10 @@ def main(argv: list[str] | None = None) -> int:
         names = set(archive.namelist())
     if "kona/contract.py" not in names:
         raise RuntimeError(f"wheel does not contain runtime contract module: {wheel.name}")
-    if "kona/workspace.py" not in names or "kona/bundle.py" not in names or "kona/github.py" not in names:
-        raise RuntimeError(f"wheel does not contain workspace policy module: {wheel.name}")
-    source_archives = sorted(distribution.glob("kona_local_hop-0.5.0.tar.gz"))
+    runtime_modules = ("kona/workspace.py", "kona/bundle.py", "kona/github.py", "kona/authoring.py", "kona/explanation.py")
+    if any(module not in names for module in runtime_modules):
+        raise RuntimeError(f"wheel does not contain all runtime modules: {wheel.name}")
+    source_archives = sorted(distribution.glob(f"kona_local_hop-{__version__}.tar.gz"))
     if source_archives:
         with tarfile.open(source_archives[-1], "r:gz") as archive:
             source_names = set(archive.getnames())
@@ -47,8 +50,9 @@ def main(argv: list[str] | None = None) -> int:
             text=True,
         )
         subprocess.run([str(installed_python), "-m", "kona", "--help"], cwd=temporary, env=environment, check=True)
+        subprocess.run([str(installed_python), "-m", "kona", "contract", "templates", "--json"], cwd=temporary, env=environment, check=True)
         subprocess.run(
-            [str(installed_python), "-c", "import kona; assert kona.__version__ == '0.5.0'"],
+            [str(installed_python), "-c", f"import kona; assert kona.__version__ == '{__version__}'"],
             cwd=temporary,
             env=environment,
             check=True,
