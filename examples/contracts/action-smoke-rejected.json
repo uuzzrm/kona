@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "github-action-rejected-smoke",
+  "command": ["python", "-c", "print('intentional rejection')"],
+  "timeout": 30,
+  "assertions": [
+    {"type": "exit_code", "equals": 7}
+  ]
+}

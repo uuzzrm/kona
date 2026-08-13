@@ -1,0 +1,64 @@
+name: Action smoke
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Kona Agent Gate
+        id: kona
+        uses: ./
+        with:
+          contract: examples/contracts/action-smoke.json
+          artifact-name: kona-action-smoke-${{ matrix.os }}
+          retention-days: "1"
+      - name: Check Action outputs
+        shell: bash
+        run: |
+          test "${{ steps.kona.outputs.outcome }}" = "passed"
+          test "${{ steps.kona.outputs.accepted }}" = "true"
+          test -n "${{ steps.kona.outputs.bundle }}"
+          test -n "${{ steps.kona.outputs.run-id }}"
+  rejected-action:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run intentionally rejected Kona gate
+        id: kona
+        continue-on-error: true
+        uses: ./
+        with:
+          contract: examples/contracts/action-smoke-rejected.json
+          artifact-name: kona-rejected-${{ matrix.os }}
+          retention-days: "1"
+      - name: Require rejection outputs
+        shell: bash
+        run: |
+          test "${{ steps.kona.outcome }}" = "failure"
+          test "${{ steps.kona.outputs.outcome }}" = "rejected"
+          test "${{ steps.kona.outputs.accepted }}" = "false"
+      - name: Download rejected evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: kona-rejected-${{ matrix.os }}
+          path: ${{ runner.temp }}/downloaded-kona
+      - name: Verify rejected bundle remains valid
+        shell: bash
+        run: |
+          set +e
+          python -m kona bundle verify "${{ runner.temp }}/downloaded-kona/kona-evidence.kona.zip" --json
+          code=$?
+          test "$code" = "1"

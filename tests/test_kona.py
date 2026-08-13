@@ -12,6 +12,7 @@ import warnings
 import zipfile
 
 from kona.bundle import create_bundle, verify_bundle
+from kona.github import _summary, run_gate
 from kona.capture import inspect_run, run_capture
 from kona.contract import ContractError, init_contract, inspect_contract_report, load_contract, run_contract
 from kona.redaction import RedactionResult, redact_argv, redact_text
@@ -581,6 +582,31 @@ class ContractTests(unittest.TestCase):
             root=Path(temporary); contract=self._write_contract(root, command=[sys.executable,"-c","from pathlib import Path; Path('empty').mkdir()"], workspace_policy={"mode":"filesystem","allow":[],"deny":[],"max_changed_paths":10})
             report, code=run_contract(contract, output_root=root / ".kona/runs", quiet=True)
             self.assertEqual(code,1); self.assertEqual(report["workspace_policy"]["unexpected"],["empty"])
+
+
+class GitHubActionAdapterTests(unittest.TestCase):
+    def _contract(self, root: Path, expected: int) -> Path:
+        path = root / "contract.json"
+        path.write_text(json.dumps({"version": 1, "name": "ci-gate", "command": [sys.executable, "-c", "print('ci gate')"], "assertions": [{"type": "exit_code", "equals": expected}]}), encoding="utf-8")
+        return path
+
+    def test_run_gate_self_verifies_passing_and_rejected_bundles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for expected, accepted in ((0, True), (3, False)):
+                with self.subTest(accepted=accepted):
+                    case = root / str(expected); case.mkdir()
+                    result = run_gate(self._contract(case, expected), case / "runs", case / "evidence.kona.zip")
+                    self.assertEqual(result["accepted"], accepted)
+                    self.assertTrue(result["bundle_valid"])
+                    self.assertTrue(Path(result["bundle"]).is_file())
+
+    def test_summary_exposes_policy_failures_without_claiming_authentication(self) -> None:
+        rendered = _summary({"accepted": False, "bundle_valid": True, "contract_name": "agent", "report": {"summary": {"passed_assertions": 2, "total_assertions": 3}, "workspace_policy": {"changed_paths": ["a", "b"], "unexpected": ["b"], "denied": ["a"]}}})
+        self.assertIn("Kona Agent gate: FAIL", rendered)
+        self.assertIn("`a`", rendered)
+        self.assertIn("`b`", rendered)
+        self.assertIn("authenticated: `no`", rendered)
 
 
 class EvidenceBundleTests(unittest.TestCase):

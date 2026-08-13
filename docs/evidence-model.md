@@ -59,7 +59,7 @@ completed run
 -> interpret valid, accepted, and authenticated separately
 ```
 
-This workflow is implemented in Kona 0.4.0. The
+This workflow is implemented by Kona. The
 bundle contains the exact contract bytes used for the run, `run.json`, both
 redacted stream artifacts, `report.json`, `report.md`, and an authoritative
 manifest. The normal directory is the canonical logical form; deterministic
