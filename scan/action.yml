@@ -1,0 +1,109 @@
+name: Kona Guard Scan
+description: Run Kona Guard's offline repository scan and publish a SARIF projection.
+author: uuzzrm
+branding:
+  icon: shield
+  color: purple
+inputs:
+  path:
+    description: Repository directory to inspect, relative to the workspace.
+    required: false
+    default: "."
+  fail-on:
+    description: Minimum severity that makes the action fail after publishing SARIF.
+    required: false
+    default: high
+  sarif-path:
+    description: Output path for the SARIF projection.
+    required: false
+    default: kona-findings.sarif
+  upload-artifact:
+    description: Upload the SARIF file as a normal workflow artifact.
+    required: false
+    default: "true"
+  artifact-name:
+    description: Name of the SARIF workflow artifact.
+    required: false
+    default: kona-findings
+  upload-sarif:
+    description: Upload SARIF to GitHub Code Scanning; requires security-events write permission.
+    required: false
+    default: "false"
+  retention-days:
+    description: Artifact retention period for the optional normal workflow artifact.
+    required: false
+    default: "14"
+  python-version:
+    description: Python version used to run Kona.
+    required: false
+    default: "3.12"
+outputs:
+  sarif:
+    description: Path to the generated SARIF projection.
+    value: ${{ steps.scan.outputs.sarif }}
+  exit-code:
+    description: Deterministic Kona scan exit code before Action enforcement.
+    value: ${{ steps.scan.outputs.exit-code }}
+  findings:
+    description: Number of findings represented in the SARIF projection.
+    value: ${{ steps.scan.outputs.findings }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install Kona
+      shell: bash
+      env:
+        KONA_REPOSITORY_ROOT: ${{ github.action_path }}/..
+      run: python -m pip install --disable-pip-version-check "$KONA_REPOSITORY_ROOT"
+    - name: Scan repository
+      id: scan
+      shell: bash
+      env:
+        KONA_SCAN_PATH: ${{ inputs.path }}
+        KONA_FAIL_ON: ${{ inputs.fail-on }}
+        KONA_SARIF_PATH: ${{ inputs.sarif-path }}
+      run: |
+        set +e
+        case "$KONA_SARIF_PATH" in
+          *$'\n'*|*$'\r'*)
+            echo "sarif-path must not contain line breaks" >&2
+            echo "sarif=" >> "$GITHUB_OUTPUT"
+            echo "findings=0" >> "$GITHUB_OUTPUT"
+            echo "exit-code=2" >> "$GITHUB_OUTPUT"
+            exit 0
+            ;;
+        esac
+        python -m kona scan "$KONA_SCAN_PATH" --format sarif --output "$KONA_SARIF_PATH" --fail-on "$KONA_FAIL_ON"
+        code=$?
+        if [ -f "$KONA_SARIF_PATH" ]; then
+          echo "sarif=$KONA_SARIF_PATH" >> "$GITHUB_OUTPUT"
+          findings=$(python -c "import json, os; print(sum(len(run.get('results', [])) for run in json.load(open(os.environ['KONA_SARIF_PATH'], encoding='utf-8'))['runs']))")
+          echo "findings=$findings" >> "$GITHUB_OUTPUT"
+        else
+          echo "sarif=" >> "$GITHUB_OUTPUT"
+          echo "findings=0" >> "$GITHUB_OUTPUT"
+        fi
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        exit 0
+    - name: Upload SARIF artifact
+      if: ${{ always() && inputs.upload-artifact == 'true' && steps.scan.outputs.sarif != '' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.scan.outputs.sarif }}
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention-days }}
+    - name: Upload to GitHub Code Scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && steps.scan.outputs.sarif != '' }}
+      uses: github/codeql-action/upload-sarif@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif }}
+    - name: Enforce Kona scan
+      shell: bash
+      env:
+        KONA_EXIT_CODE: ${{ steps.scan.outputs.exit-code }}
+      run: exit "$KONA_EXIT_CODE"
