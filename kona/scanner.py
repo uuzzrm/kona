@@ -127,8 +127,7 @@ def _scan_text(relative: str, text: str) -> list[dict[str, Any]]:
             if re.search(r"\bpull_request_target\s*:", code_line):
                 findings.append(_finding("CFG002", "medium", "github-actions", "Privileged pull request trigger", "pull_request_target runs in the base repository security context.", relative, number, line.strip(), "Avoid executing pull-request-controlled content in this workflow."))
             used = _USES.search(code_line)
-            released_self_smoke = relative == ".github/workflows/released-action-smoke.yml" and used and used.group(1) == "uuzzrm/kona@v0"
-            if used and not released_self_smoke and not used.group(1).startswith(("./", "docker://")) and "@" in used.group(1):
+            if used and not used.group(1).startswith(("./", "docker://")) and "@" in used.group(1):
                 reference = used.group(1).rsplit("@", 1)[1]
                 if not re.fullmatch(r"[0-9a-fA-F]{40}", reference):
                     findings.append(_finding("CFG003", "medium", "github-actions", "Mutable Action reference", "A third-party Action is not pinned to a full commit SHA.", relative, number, used.group(1), "Pin the Action to a reviewed 40-character commit SHA."))
@@ -261,7 +260,7 @@ def _sarif_uri(path: object) -> str | None:
     return quote(path.replace("\\", "/"), safe="/!$&'()*+,-.:;=@_~")
 
 
-def render_sarif_report(report: dict[str, Any]) -> str:
+def render_sarif_report(report: dict[str, Any], *, path_prefix: str = "") -> str:
     """Render location-bearing deterministic findings as SARIF 2.1.0.
 
     This is a presentation adapter. The canonical JSON report retains the
@@ -290,7 +289,12 @@ def render_sarif_report(report: dict[str, Any]) -> str:
         fingerprint = item.get("fingerprint")
         if rule_id not in _SARIF_RULES or severity not in _SEVERITY or not isinstance(location, dict):
             continue
-        uri = _sarif_uri(location.get("path"))
+        path = location.get("path")
+        if path_prefix:
+            if not isinstance(path, str):
+                continue
+            path = f"{path_prefix.rstrip('/\\')}/{path}"
+        uri = _sarif_uri(path)
         line = location.get("line")
         if uri is None or isinstance(line, bool) or not isinstance(line, int) or line < 1:
             continue
@@ -301,7 +305,10 @@ def render_sarif_report(report: dict[str, Any]) -> str:
             "level": "error" if severity in {"critical", "high"} else "warning" if severity == "medium" else "note",
             "message": {"text": _SARIF_RULES[rule_id][1]},
             "locations": [{"physicalLocation": {"artifactLocation": {"uri": uri}, "region": {"startLine": line}}}],
-            "partialFingerprints": {"konaFinding": fingerprint.removeprefix("sha256:")},
+            "partialFingerprints": {
+                "konaFinding": fingerprint.removeprefix("sha256:"),
+                "primaryLocationLineHash": fingerprint.removeprefix("sha256:"),
+            },
         }
         results.append(result)
     scan = report["scan"]
@@ -330,11 +337,11 @@ def render_sarif_report(report: dict[str, Any]) -> str:
     return json.dumps(sarif, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
 
 
-def render_scan_report(report: dict[str, Any], *, format: str = "text") -> str:
+def render_scan_report(report: dict[str, Any], *, format: str = "text", sarif_prefix: str = "") -> str:
     if format == "json":
         return json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
     if format == "sarif":
-        return render_sarif_report(report)
+        return render_sarif_report(report, path_prefix=sarif_prefix)
     if format != "text":
         raise ScanError(f"unknown scan report format: {format}")
     lines = ["Kona Project Scan", "Mode: deterministic, offline, read-only", ""]
