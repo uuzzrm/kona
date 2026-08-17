@@ -11,6 +11,7 @@ import sys
 
 from .capture import DEFAULT_TIMEOUT_SECONDS, inspect_run, run_capture
 from .bundle import BundleError, create_bundle, verify_bundle
+from .baseline import BaselineError, apply_baseline, load_baseline, write_baseline
 from .authoring import AuthoringRequest, author_contract, list_templates
 from .contract import ContractError, init_contract, inspect_contract_report, load_contract, run_contract
 from .explanation import explain_contract, render_contract_explanation
@@ -32,6 +33,8 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--output", type=Path, help="write the rendered report without overwriting")
     scan.add_argument("--fail-on", choices=("critical", "high", "medium", "low", "info"), default="high")
     scan.add_argument("--sarif-prefix", default="", help="repository-relative path prefix for SARIF locations")
+    scan.add_argument("--baseline", type=Path, help="apply a validated finding baseline without network access")
+    scan.add_argument("--write-baseline", type=Path, help="create a new deterministic baseline from this scan")
 
     explain = commands.add_parser("explain", help="optionally send redacted findings, never source, for advisory AI explanation")
     explain.add_argument("path", nargs="?", type=Path, default=Path("."))
@@ -139,7 +142,15 @@ def _run(args: argparse.Namespace) -> int:
 
 def _scan(args: argparse.Namespace) -> int:
     try:
+        baseline = load_baseline(args.baseline) if args.baseline is not None else None
         report = scan_repository(args.path, ScanPolicy())
+        if args.write_baseline is not None:
+            if args.baseline is not None and args.write_baseline.expanduser() == args.baseline.expanduser():
+                raise ScanError("--baseline and --write-baseline must use different paths")
+            count = write_baseline(report, args.write_baseline)
+            print(f"[kona] baseline entries={count} path={args.write_baseline.expanduser().resolve()}", file=sys.stderr)
+        if baseline is not None:
+            report = apply_baseline(report, baseline)
         rendered = render_scan_report(report, format=args.format, sarif_prefix=args.sarif_prefix)
         if args.output is not None:
             output = args.output.expanduser()
@@ -150,7 +161,7 @@ def _scan(args: argparse.Namespace) -> int:
                 handle.write(rendered)
         print(rendered, end="")
         return threshold_exit_code(report, args.fail_on)
-    except (ScanError, OSError, ValueError) as error:
+    except (BaselineError, ScanError, OSError, ValueError) as error:
         print(f"kona scan: {redact_text(str(error)).text}", file=sys.stderr)
         return 2
 
