@@ -6,7 +6,7 @@
 - [x] Implement assertions and JSON/Markdown reports.
 - [x] Add the `kona contract run` CLI flow.
 - [x] Update README, Skill, version, and CI.
-- [ ] Run local and GitHub checks, review, merge, and verify `main`.
+- [x] Run local and GitHub checks, review, merge, and verify `main`.
 
 ## Active v0.9 work
 
@@ -16,4 +16,11 @@
 - [x] Add standalone `scan/action.yml` integration.
 - [x] Add cross-platform scan Action smoke coverage.
 - [x] Update README and ADR with the projection boundary.
-- [ ] Run full release gate and live main audit.
+- [x] Run full release gate and live main audit.
+
+## v0.9.1 review hardening
+
+- [x] Preserve repository-root SARIF paths for subdirectory scans.
+- [x] Harden Action workspace boundaries, artifact publication, and Code
+  Scanning correlation.
+- [x] Verify the installed wheel against a real high-severity finding.
