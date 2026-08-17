@@ -89,6 +89,29 @@ jobs:
         run: |
           mkdir -p scan-fixture
           python -c "from pathlib import Path; Path('scan-fixture/settings.py').write_text('TOKEN = ' + repr('ghp_' + 'A' * 36) + '\\n', encoding='utf-8')"
+      - name: Create root scan baseline
+        shell: bash
+        run: |
+          set +e
+          python -m kona scan . --format json --write-baseline .kona/root-baseline.json --fail-on high > "$RUNNER_TEMP/kona-baseline-scan.json"
+          code=$?
+          test "$code" = "1"
+      - name: Run root baseline scan Action
+        id: baseline
+        uses: ./scan
+        with:
+          path: .
+          baseline: .kona/root-baseline.json
+          sarif-path: .kona/root-baselined.sarif
+          artifact-name: kona-scan-baseline-${{ matrix.os }}
+          retention-days: "1"
+      - name: Check root baseline outputs
+        shell: bash
+        run: |
+          test "${{ steps.baseline.outputs.exit-code }}" = "0"
+          test "${{ steps.baseline.outputs.findings }}" = "0"
+          test "${{ steps.baseline.outputs.baseline-suppressed }}" = "1"
+          test -n "${{ steps.baseline.outputs.sarif }}"
       - name: Run intentionally failing scan Action
         id: finding
         continue-on-error: true
