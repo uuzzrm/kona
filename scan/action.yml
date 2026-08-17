@@ -41,6 +41,10 @@ inputs:
     description: Python version used to run Kona.
     required: false
     default: "3.12"
+  baseline:
+    description: Optional workspace-relative kona.baseline/v1 file for suppressing known finding fingerprints.
+    required: false
+    default: ""
 outputs:
   sarif:
     description: Path to the generated SARIF projection.
@@ -51,6 +55,9 @@ outputs:
   findings:
     description: Number of findings represented in the SARIF projection.
     value: ${{ steps.scan.outputs.findings }}
+  baseline-suppressed:
+    description: Number of finding fingerprints suppressed by the optional baseline.
+    value: ${{ steps.scan.outputs.baseline-suppressed }}
 runs:
   using: composite
   steps:
@@ -71,6 +78,7 @@ runs:
         KONA_FAIL_ON: ${{ inputs.fail-on }}
         KONA_SARIF_PATH: ${{ inputs.sarif-path }}
         KONA_WORKSPACE: ${{ github.workspace }}
+        KONA_BASELINE: ${{ inputs.baseline }}
       run: |
         set +e
         case "$KONA_SARIF_PATH" in
@@ -78,11 +86,12 @@ runs:
             echo "sarif-path must not contain line breaks" >&2
             echo "sarif=" >> "$GITHUB_OUTPUT"
             echo "findings=0" >> "$GITHUB_OUTPUT"
+            echo "baseline-suppressed=0" >> "$GITHUB_OUTPUT"
             echo "exit-code=2" >> "$GITHUB_OUTPUT"
             exit 0
             ;;
         esac
-        scan_values=$(python -c 'import os, sys; from pathlib import Path
+        scan_values=$(python -c 'import json, os, sys; from pathlib import Path
         workspace = Path(os.environ["KONA_WORKSPACE"]).resolve()
         raw = os.environ["KONA_SCAN_PATH"]
         if not raw or raw.startswith(("/", "\\")) or (len(raw) >= 2 and raw[1] == ":") or any(char in raw for char in "\r\n\t"):
@@ -97,25 +106,51 @@ runs:
             relative = resolved.relative_to(workspace)
         except (OSError, RuntimeError, ValueError):
             raise SystemExit("path must be an existing directory inside the workspace")
-        sys.stdout.write(str(resolved) + "\t" + (relative.as_posix() if relative.parts else ""))')
+        raw_baseline = os.environ["KONA_BASELINE"]
+        baseline = ""
+        if raw_baseline:
+            if raw_baseline.startswith(("/", "\\")) or (len(raw_baseline) >= 2 and raw_baseline[1] == ":") or any(char in raw_baseline for char in "\r\n\t"):
+                raise SystemExit("baseline must be workspace-relative")
+            baseline_candidate = workspace / raw_baseline
+            if baseline_candidate.is_symlink():
+                raise SystemExit("baseline must not be a symlink")
+            try:
+                baseline_resolved = baseline_candidate.resolve(strict=True)
+                baseline_resolved.relative_to(workspace)
+                if not baseline_resolved.is_file():
+                    raise OSError
+            except (OSError, RuntimeError, ValueError):
+                raise SystemExit("baseline must be an existing file inside the workspace")
+            baseline = str(baseline_resolved)
+        sys.stdout.write(json.dumps({"scan_root": str(resolved), "sarif_prefix": relative.as_posix() if relative.parts else "", "baseline": baseline}, separators=(",", ":")))')
         validation_code=$?
         if [ "$validation_code" -ne 0 ]; then
           echo "path must be an existing workspace-relative directory" >&2
           echo "sarif=" >> "$GITHUB_OUTPUT"
           echo "findings=0" >> "$GITHUB_OUTPUT"
+          echo "baseline-suppressed=0" >> "$GITHUB_OUTPUT"
           echo "exit-code=2" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        IFS=$'\t' read -r scan_root sarif_prefix <<< "$scan_values"
-        python -m kona scan "$scan_root" --format sarif --sarif-prefix "$sarif_prefix" --output "$KONA_SARIF_PATH" --fail-on "$KONA_FAIL_ON"
+        scan_root=$(python -c 'import json, sys; sys.stdout.write(json.load(sys.stdin)["scan_root"])' <<< "$scan_values")
+        sarif_prefix=$(python -c 'import json, sys; sys.stdout.write(json.load(sys.stdin)["sarif_prefix"])' <<< "$scan_values")
+        baseline_path=$(python -c 'import json, sys; sys.stdout.write(json.load(sys.stdin)["baseline"])' <<< "$scan_values")
+        baseline_args=()
+        if [ -n "$baseline_path" ]; then
+          baseline_args+=(--baseline "$baseline_path")
+        fi
+        python -m kona scan "$scan_root" --format sarif --sarif-prefix "$sarif_prefix" --output "$KONA_SARIF_PATH" --fail-on "$KONA_FAIL_ON" "${baseline_args[@]}"
         code=$?
         if [ "$code" -le 1 ] && [ -f "$KONA_SARIF_PATH" ]; then
           echo "sarif=$KONA_SARIF_PATH" >> "$GITHUB_OUTPUT"
           findings=$(python -c "import json, os; print(sum(len(run.get('results', [])) for run in json.load(open(os.environ['KONA_SARIF_PATH'], encoding='utf-8'))['runs']))")
           echo "findings=$findings" >> "$GITHUB_OUTPUT"
+          suppressed=$(python -c "import json, os; print(json.load(open(os.environ['KONA_SARIF_PATH'], encoding='utf-8'))['runs'][0].get('properties', {}).get('baselineSuppressed', 0))")
+          echo "baseline-suppressed=$suppressed" >> "$GITHUB_OUTPUT"
         else
           echo "sarif=" >> "$GITHUB_OUTPUT"
           echo "findings=0" >> "$GITHUB_OUTPUT"
+          echo "baseline-suppressed=0" >> "$GITHUB_OUTPUT"
         fi
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
         exit 0
