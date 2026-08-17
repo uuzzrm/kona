@@ -1,3 +1,3 @@
 """Kona: local acceptance gates and evidence packages for AI Agent work."""
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
