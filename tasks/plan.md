@@ -155,7 +155,7 @@ and expose that projection through a separate `scan/action.yml` entry point.
 4. [x] Run independent review, full verification, release, merge/direct-main
    push, and live audit.
 
-## Next increment: baseline adoption and scan accounting
+## v0.10 baseline adoption
 
 The v0.9 scanner is useful for new repositories, but an existing repository
 with known findings cannot adopt a blocking CI threshold without either fixing
@@ -176,18 +176,18 @@ authoritative finding boundary.
 
 ### Acceptance criteria
 
-- [ ] `kona scan --write-baseline PATH` creates a deterministic, non-overwriting
+- [x] `kona scan --write-baseline PATH` creates a deterministic, non-overwriting
   `kona.baseline/v1` file without evidence or secret values.
-- [ ] `kona scan --baseline PATH` suppresses only matching fingerprints,
+- [x] `kona scan --baseline PATH` suppresses only matching fingerprints,
   reports suppression/stale counts, and still fails on newly introduced risks.
-- [ ] The standalone scan Action accepts a workspace-relative baseline and
+- [x] The standalone scan Action accepts a workspace-relative baseline and
   exposes the number of suppressed findings without weakening path checks.
-- [ ] Local and cross-platform CI tests cover malformed baselines, secret
+- [x] Local and cross-platform CI tests cover malformed baselines, secret
   redaction, deterministic output, and the ratchet workflow.
 
 ### Work order
 
-1. [ ] Add the baseline module and CLI integration.
-2. [ ] Add Action support, documentation, and an ADR.
-3. [ ] Run the full release gate, publish the next verified release, and audit
+1. [x] Add the baseline module and CLI integration.
+2. [x] Add Action support, documentation, and an ADR.
+3. [x] Run the full release gate, publish the next verified release, and audit
    the live `main` state.
