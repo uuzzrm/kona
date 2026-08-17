@@ -137,7 +137,12 @@ Deferred. It would make failures visible in many CI products, but it cannot carr
 
 ### SARIF export as the next feature
 
-Deferred. SARIF is excellent for file-located analysis findings, but many Kona assertions have no meaningful source region. Mapping every failed acceptance check to a security/code-scanning alert would distort both products. Add it only for policy checks that have stable rule IDs and real locations.
+Implemented in Kona Guard 0.9.0 as a selective projection. SARIF is excellent
+for file-located analysis findings, but many Kona assertions have no meaningful
+source region. Kona therefore maps only deterministic scanner findings with
+stable rule IDs and real relative file/line locations; contract assertions and
+AI advice remain outside SARIF. See
+[`docs/decisions/0005-sarif-scan-projection.md`](../decisions/0005-sarif-scan-projection.md).
 
 ### GitHub Action as the next feature
 
