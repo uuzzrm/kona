@@ -176,8 +176,6 @@ authoritative finding boundary.
 
 ### Acceptance criteria
 
-- [ ] Directory traversal counts each entry exactly once and has a regression
-  test.
 - [ ] `kona scan --write-baseline PATH` creates a deterministic, non-overwriting
   `kona.baseline/v1` file without evidence or secret values.
 - [ ] `kona scan --baseline PATH` suppresses only matching fingerprints,
@@ -189,8 +187,7 @@ authoritative finding boundary.
 
 ### Work order
 
-1. [ ] Fix entry accounting and add the focused regression test.
-2. [ ] Add the baseline module and CLI integration.
-3. [ ] Add Action support, documentation, and an ADR.
-4. [ ] Run the full release gate, publish the next verified release, and audit
+1. [ ] Add the baseline module and CLI integration.
+2. [ ] Add Action support, documentation, and an ADR.
+3. [ ] Run the full release gate, publish the next verified release, and audit
    the live `main` state.
