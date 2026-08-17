@@ -62,3 +62,46 @@ jobs:
           python -m kona bundle verify "${{ runner.temp }}/downloaded-kona/kona-evidence.kona.zip" --json
           code=$?
           test "$code" = "1"
+
+  scan-action:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Run clean Kona Guard scan Action
+        id: clean
+        uses: ./scan
+        with:
+          path: .
+          sarif-path: .kona/clean-findings.sarif
+          artifact-name: kona-scan-clean-${{ matrix.os }}
+          retention-days: "1"
+      - name: Check clean scan outputs
+        shell: bash
+        run: |
+          test "${{ steps.clean.outputs.exit-code }}" = "0"
+          test "${{ steps.clean.outputs.findings }}" = "0"
+          test -n "${{ steps.clean.outputs.sarif }}"
+      - name: Create finding fixture
+        shell: bash
+        run: |
+          mkdir -p scan-fixture
+          python -c "from pathlib import Path; Path('scan-fixture/settings.py').write_text('TOKEN = ' + repr('ghp_' + 'A' * 36) + '\\n', encoding='utf-8')"
+      - name: Run intentionally failing scan Action
+        id: finding
+        continue-on-error: true
+        uses: ./scan
+        with:
+          path: scan-fixture
+          fail-on: high
+          sarif-path: .kona/finding.sarif
+          artifact-name: kona-scan-finding-${{ matrix.os }}
+          retention-days: "1"
+      - name: Check finding scan outputs
+        shell: bash
+        run: |
+          test "${{ steps.finding.outcome }}" = "failure"
+          test "${{ steps.finding.outputs.exit-code }}" = "1"
+          test "${{ steps.finding.outputs.findings }}" = "1"
