@@ -116,7 +116,7 @@ stale entries that should be reviewed and removed.
 The standalone scan Action accepts the same workspace-relative baseline:
 
 ```yaml
-- uses: uuzzrm/kona/scan@92720fb3465c6a40567a83882ae7a025c9c160a8 # v0.9.1
+- uses: uuzzrm/kona/scan@0b882e8595dc9ae02f7e990c1baf1ae42980e32b # v0.10.0
   with:
     baseline: .kona/kona-baseline.json
     fail-on: high
@@ -182,7 +182,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-  - uses: uuzzrm/kona/scan@92720fb3465c6a40567a83882ae7a025c9c160a8 # v0.9.1
+  - uses: uuzzrm/kona/scan@0b882e8595dc9ae02f7e990c1baf1ae42980e32b # v0.10.0
     with:
       path: .
       fail-on: high
@@ -200,7 +200,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-  - uses: uuzzrm/kona/scan@92720fb3465c6a40567a83882ae7a025c9c160a8 # v0.9.1
+  - uses: uuzzrm/kona/scan@0b882e8595dc9ae02f7e990c1baf1ae42980e32b # v0.10.0
     with:
       upload-sarif: "true"
       category: kona-guard
