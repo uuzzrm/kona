@@ -198,6 +198,7 @@ class ConfigurationScannerTests(ScannerTestCase):
         self.assertEqual(result["level"], "error")
         self.assertEqual(result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"], "config.py")
         self.assertEqual(result["locations"][0]["physicalLocation"]["region"]["startLine"], 1)
+        self.assertEqual(result["partialFingerprints"]["primaryLocationLineHash"], result["partialFingerprints"]["konaFinding"])
         self.assertNotIn(token, rendered)
         self.assertNotIn("evidence", rendered)
         self.assertNotIn(str(self.root), rendered)
@@ -205,6 +206,18 @@ class ConfigurationScannerTests(ScannerTestCase):
     def test_sarif_projection_is_deterministic_for_clean_scan(self) -> None:
         self.write("README.md", "safe\n")
         self.assertEqual(render_scan_report(self.scan(), format="sarif"), render_scan_report(self.scan(), format="sarif"))
+
+    def test_sarif_projection_can_restore_repository_root_prefix(self) -> None:
+        token = "ghp_" + "P" * 36
+        self.write("settings.py", f'TOKEN = "{token}"\n')
+        report = self.scan()
+
+        sarif = json.loads(render_scan_report(report, format="sarif", sarif_prefix="scan-fixture"))
+
+        self.assertEqual(
+            sarif["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "scan-fixture/settings.py",
+        )
 
     def test_sarif_projection_omits_untrusted_or_unlocatable_findings(self) -> None:
         report = self.scan()
