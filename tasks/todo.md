@@ -27,7 +27,6 @@
 
 ## Active v0.10 baseline adoption
 
-- [ ] Fix duplicate directory-entry accounting and add a regression test.
 - [ ] Add deterministic `kona.baseline/v1` creation and validation.
 - [ ] Add explicit CLI baseline application and ratchet exit behavior.
 - [ ] Add workspace-relative baseline support to `scan/action.yml`.
