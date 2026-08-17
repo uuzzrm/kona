@@ -148,7 +148,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-  - uses: uuzzrm/kona/scan@ce4eef29d647bc51a628308db9d62ae41c407985 # v0.9.0
+  - uses: uuzzrm/kona/scan@8ee2860cd4eb349c2968081629ab48d06f4393d4 # v0.9.1
     with:
       path: .
       fail-on: high
@@ -166,7 +166,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-  - uses: uuzzrm/kona/scan@ce4eef29d647bc51a628308db9d62ae41c407985 # v0.9.0
+  - uses: uuzzrm/kona/scan@8ee2860cd4eb349c2968081629ab48d06f4393d4 # v0.9.1
     with:
       upload-sarif: "true"
       category: kona-guard
