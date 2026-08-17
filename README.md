@@ -93,6 +93,40 @@ kona scan . --format sarif --output kona-findings.sarif
 kona scan . --fail-on medium
 ```
 
+### Ratchet an existing repository with a baseline
+
+If a repository already has findings, record the current fingerprints once and
+then make CI fail only when a new fingerprint appears:
+
+```bash
+# Review and commit this file after fixing or explicitly accepting its findings.
+kona scan . --format json --write-baseline .kona/kona-baseline.json
+
+# Later scans suppress only the exact fingerprints recorded in the baseline.
+kona scan . --baseline .kona/kona-baseline.json --fail-on high
+```
+
+The `kona.baseline/v1` file contains only finding fingerprints, rule IDs, and
+severity. It never contains paths, source, evidence previews, or credentials.
+Baseline creation refuses to overwrite an existing file; malformed, oversized,
+symlinked, or changing baselines fail closed. A baseline is not a security
+approval: new fingerprints remain active, and `baseline_unmatched` identifies
+stale entries that should be reviewed and removed.
+
+The standalone scan Action accepts the same workspace-relative baseline:
+
+```yaml
+- uses: uuzzrm/kona/scan@92720fb3465c6a40567a83882ae7a025c9c160a8 # v0.9.1
+  with:
+    baseline: .kona/kona-baseline.json
+    fail-on: high
+```
+
+Its `findings` output and SARIF results represent active findings; the
+`baseline-suppressed` output reports how many known fingerprints were hidden.
+Keep the canonical JSON report and review stale baseline entries as part of
+the normal remediation process.
+
 Example:
 
 ```text
