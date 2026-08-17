@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -53,6 +54,24 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run([str(installed_python), "-m", "kona", "contract", "templates", "--json"], cwd=temporary, env=environment, check=True)
         subprocess.run([str(installed_python), "-m", "kona", "scan", ".", "--format", "json"], cwd=temporary, env=environment, check=True)
         subprocess.run([str(installed_python), "-m", "kona", "scan", ".", "--format", "sarif"], cwd=temporary, env=environment, check=True)
+        finding_token = "ghp_" + "Z" * 36
+        (Path(temporary) / "finding.py").write_text(f'TOKEN = "{finding_token}"\n', encoding="utf-8")
+        finding = subprocess.run(
+            [str(installed_python), "-m", "kona", "scan", ".", "--format", "sarif", "--fail-on", "high"],
+            cwd=temporary,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if finding.returncode != 1:
+            raise RuntimeError(f"installed wheel did not fail on a high finding: {finding.returncode}")
+        finding_sarif = json.loads(finding.stdout)
+        finding_results = finding_sarif["runs"][0]["results"]
+        if not any(result.get("ruleId") == "SEC002" for result in finding_results):
+            raise RuntimeError("installed wheel did not emit the expected SEC002 SARIF result")
+        if finding_token in finding.stdout or finding_token in finding.stderr:
+            raise RuntimeError("installed wheel leaked the fixture credential")
         subprocess.run([str(installed_python), "-m", "kona", "explain", ".", "--provider", "deepseek", "--model", "deepseek-v4-pro", "--preview"], cwd=temporary, env=environment, check=True)
         subprocess.run(
             [str(installed_python), "-c", f"import kona; assert kona.__version__ == '{__version__}'"],
