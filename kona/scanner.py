@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import stat
 from typing import Any
+from urllib.parse import quote
 
 from . import __version__
 from .redaction import redact_text
@@ -34,6 +35,19 @@ _ASSIGNMENT = re.compile(r"(?i)^\s*(?:export\s+)?['\"]?(api[_-]?key|access[_-]?t
 _PLACEHOLDER = re.compile(r"(?i)^(?:example|dummy|changeme|replace[-_]?me|test|placeholder|your[-_]|\[redacted\]|<[^>]+>|\$\{[^}]+\})")
 _USES = re.compile(r"\buses\s*:\s*['\"]?([^\s'\"]+)['\"]?")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")
+
+_SARIF_RULES: dict[str, tuple[str, str, str]] = {
+    "SEC001": ("Private key material", "A private-key PEM header is present.", "Revoke and remove the private key from the repository and its history."),
+    "SEC002": ("Provider credential", "A provider-specific credential shape is present.", "Revoke the credential and load its replacement from a secret store."),
+    "SEC003": ("Hard-coded credential assignment", "A sensitive variable is assigned a non-placeholder value.", "Move the value to an environment variable or secret store and rotate it."),
+    "CFG001": ("Broad workflow write permission", "The workflow requests write-all permissions.", "Declare only the minimum required permissions."),
+    "CFG002": ("Privileged pull request trigger", "pull_request_target runs in the base repository security context.", "Avoid executing pull-request-controlled content in this workflow."),
+    "CFG003": ("Mutable Action reference", "A third-party Action is not pinned to a full commit SHA.", "Pin the Action to a reviewed 40-character commit SHA."),
+    "AGT001": ("Instruction exposes credentials", "An Agent instruction requests handling credentials through an unsafe side effect.", "Remove the instruction and keep credentials outside Agent-visible outputs."),
+    "AGT002": ("Instruction bypasses a safeguard", "An Agent instruction requests bypassing a verification or security control.", "Require the control and document any narrowly scoped exception."),
+    "DEP001": ("Dependency lockfile missing", "A dependency-bearing project has no nearby recognized lockfile.", "Commit the lockfile used by this package root."),
+    "DEP002": ("Floating remote dependency", "A remote Python dependency is not pinned to an immutable revision.", "Pin the dependency to an immutable commit and verify its integrity."),
+}
 
 
 def _is_reparse_point(metadata: os.stat_result) -> bool:
@@ -236,9 +250,91 @@ def threshold_exit_code(report: dict[str, Any], fail_on: str = "high") -> int:
     return 1 if any(_SEVERITY[item["severity"]] >= _SEVERITY[fail_on] for item in report["findings"]) else 0
 
 
+def _sarif_uri(path: object) -> str | None:
+    if not isinstance(path, str) or not path or "\x00" in path:
+        return None
+    if path.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", path):
+        return None
+    parts = path.replace("\\", "/").split("/")
+    if any(part in {".", ".."} for part in parts):
+        return None
+    return quote(path.replace("\\", "/"), safe="/!$&'()*+,-.:;=@_~")
+
+
+def render_sarif_report(report: dict[str, Any]) -> str:
+    """Render location-bearing deterministic findings as SARIF 2.1.0.
+
+    This is a presentation adapter. The canonical JSON report retains the
+    scanner's complete trust boundary and remains authoritative.
+    """
+
+    rules = []
+    for rule_id, (title, message, remediation) in _SARIF_RULES.items():
+        rules.append(
+            {
+                "id": rule_id,
+                "name": rule_id,
+                "shortDescription": {"text": title},
+                "fullDescription": {"text": message},
+                "help": {"text": remediation},
+                "properties": {"category": "kona-deterministic"},
+            }
+        )
+    results = []
+    for item in report.get("findings", []):
+        if not isinstance(item, dict):
+            continue
+        rule_id = item.get("rule_id")
+        severity = item.get("severity")
+        location = item.get("location")
+        fingerprint = item.get("fingerprint")
+        if rule_id not in _SARIF_RULES or severity not in _SEVERITY or not isinstance(location, dict):
+            continue
+        uri = _sarif_uri(location.get("path"))
+        line = location.get("line")
+        if uri is None or isinstance(line, bool) or not isinstance(line, int) or line < 1:
+            continue
+        if not isinstance(fingerprint, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", fingerprint):
+            continue
+        result = {
+            "ruleId": rule_id,
+            "level": "error" if severity in {"critical", "high"} else "warning" if severity == "medium" else "note",
+            "message": {"text": _SARIF_RULES[rule_id][1]},
+            "locations": [{"physicalLocation": {"artifactLocation": {"uri": uri}, "region": {"startLine": line}}}],
+            "partialFingerprints": {"konaFinding": fingerprint.removeprefix("sha256:")},
+        }
+        results.append(result)
+    scan = report["scan"]
+    summary = report["summary"]
+    sarif = {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "Kona Guard", "version": report["tool"]["version"], "informationUri": "https://github.com/uuzzrm/kona", "rules": rules}},
+                "results": results,
+                "properties": {
+                    "konaSchema": report["schema"],
+                    "verdict": summary["verdict"],
+                    "complete": scan["complete"],
+                    "offline": scan["offline"],
+                    "readOnly": scan["read_only"],
+                    "authenticated": scan["authenticated"],
+                    "filesExamined": scan["files_examined"],
+                    "entriesExamined": scan["entries_examined"],
+                    "skippedCount": len(scan.get("skipped", [])),
+                },
+            }
+        ],
+    }
+    return json.dumps(sarif, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+
+
 def render_scan_report(report: dict[str, Any], *, format: str = "text") -> str:
     if format == "json":
         return json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    if format == "sarif":
+        return render_sarif_report(report)
     if format != "text":
         raise ScanError(f"unknown scan report format: {format}")
     lines = ["Kona Project Scan", "Mode: deterministic, offline, read-only", ""]

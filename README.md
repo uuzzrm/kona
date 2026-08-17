@@ -23,7 +23,8 @@ working.
 Kona Guard deterministically checks exposed credential shapes, unsafe GitHub
 Actions configuration, risky Agent instructions, and dependency-integrity
 gaps. It runs offline, reads files without executing project code, never
-follows links, and emits redacted text or JSON findings with stable rule IDs.
+follows links, and emits redacted text, JSON, or SARIF findings with stable
+rule IDs.
 
 ```text
 repository -> bounded read-only scan -> redacted findings -> CI decision
@@ -37,8 +38,8 @@ repository -> bounded read-only scan -> redacted findings -> CI decision
 
 The scanner answers “did these enabled checks find a concrete risk?” It does
 not claim that a clean scan proves the repository has no vulnerabilities.
-Optional AI explanations are a separate future layer and will never determine
-the scan result.
+Optional AI explanations are a separate advisory layer and never determine the
+scan result.
 
 ## Optional AI explanation
 
@@ -88,6 +89,7 @@ default.
 ```bash
 kona scan .
 kona scan . --format json --output kona-findings.json
+kona scan . --format sarif --output kona-findings.sarif
 kona scan . --fail-on medium
 ```
 
@@ -133,6 +135,42 @@ The scanner is bounded by entry, depth, file-size, and total-byte limits. An
 unsafe link, changing file, unreadable entry, special file, or exceeded limit
 fails closed instead of producing a misleading clean result. Secret evidence
 is replaced before persistence; scanner reports contain no matched secret.
+
+### GitHub Actions scan
+
+For a ready-made CI entry point, use the standalone scan Action. It uploads a
+normal workflow artifact by default and enforces the same deterministic exit
+threshold after the file is published:
+
+```yaml
+permissions:
+  contents: read
+
+steps:
+  - uses: uuzzrm/kona/scan@v0
+    with:
+      path: .
+      fail-on: high
+      artifact-name: kona-findings
+```
+
+To send the same SARIF projection to GitHub Code Scanning, opt in explicitly
+and grant the narrow permission required by GitHub:
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+
+steps:
+  - uses: uuzzrm/kona/scan@v0
+    with:
+      upload-sarif: "true"
+```
+
+The SARIF file is a CI presentation adapter. The JSON `kona.findings/v1`
+report remains the authoritative result; contract assertions and AI advice are
+not converted into code-scanning alerts.
 
 ## Verify Agent work
 
@@ -382,7 +420,10 @@ that a human approved the result.
 | `kona/contract.py` | Contract loading, workspace snapshots, assertions, and reports. |
 | `kona/authoring.py` | Deterministic, explicit contract template compiler. |
 | `kona/explanation.py` | Read-only authority, evidence, warning, and limitation view. |
-| `kona/cli.py` | Stable command-line seam for capture and contract workflows. |
+| `kona/scanner.py` | Bounded offline findings and JSON/SARIF projections. |
+| `kona/providers.py` | Explicit, findings-only advisory provider boundary. |
+| `kona/cli.py` | Stable command-line seam for scan, explanation, capture, and contract workflows. |
+| `scan/action.yml` | Standalone GitHub Actions scan entry point. |
 | `schemas/` | Editor-facing JSON Schema for contract authors. |
 | `examples/contracts/` | Reproducible end-to-end examples. |
 | `skills/kona-capture/` | Portable Agent instructions and stop conditions. |
