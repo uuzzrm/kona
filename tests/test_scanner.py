@@ -206,6 +206,30 @@ class ConfigurationScannerTests(ScannerTestCase):
         self.write("README.md", "safe\n")
         self.assertEqual(render_scan_report(self.scan(), format="sarif"), render_scan_report(self.scan(), format="sarif"))
 
+    def test_sarif_projection_omits_untrusted_or_unlocatable_findings(self) -> None:
+        report = self.scan()
+        report["findings"] = [
+            {
+                "rule_id": "SEC002",
+                "severity": "high",
+                "location": {"path": "../outside.txt", "line": 1},
+                "fingerprint": "sha256:" + "a" * 64,
+                "message": "do not serialize this secret",
+            },
+            {
+                "rule_id": "UNKNOWN",
+                "severity": "high",
+                "location": {"path": "safe.txt", "line": 1},
+                "fingerprint": "sha256:" + "b" * 64,
+                "message": "unknown rule",
+            },
+        ]
+
+        rendered = render_scan_report(report, format="sarif")
+
+        self.assertEqual(json.loads(rendered)["runs"][0]["results"], [])
+        self.assertNotIn("do not serialize this secret", rendered)
+
 
 class AgentInstructionScannerTests(ScannerTestCase):
     def test_does_not_flag_instruction_forbidding_safeguard_bypass(self) -> None:
