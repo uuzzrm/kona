@@ -154,3 +154,43 @@ and expose that projection through a separate `scan/action.yml` entry point.
 3. [x] Document the SARIF projection boundary and official sources.
 4. [x] Run independent review, full verification, release, merge/direct-main
    push, and live audit.
+
+## Next increment: baseline adoption and scan accounting
+
+The v0.9 scanner is useful for new repositories, but an existing repository
+with known findings cannot adopt a blocking CI threshold without either fixing
+everything at once or disabling the check. This increment adds a deterministic
+baseline so teams can ratchet toward a clean scan while preserving the
+authoritative finding boundary.
+
+### Architecture decisions
+
+- Keep baseline parsing and filtering in a separate dependency-free module;
+  the scanner continues to discover the complete raw finding set.
+- Store only schema, rule ID, severity, and stable SHA-256 finding fingerprints;
+  never store paths, evidence previews, source, or credentials in a baseline.
+- Apply a baseline explicitly from the CLI or standalone Action. A malformed,
+  oversized, symlinked, or unreadable baseline fails closed.
+- Keep active findings in `findings`; expose suppression and stale-entry counts
+  as explicit metadata. SARIF and CI thresholds operate on active findings.
+
+### Acceptance criteria
+
+- [ ] Directory traversal counts each entry exactly once and has a regression
+  test.
+- [ ] `kona scan --write-baseline PATH` creates a deterministic, non-overwriting
+  `kona.baseline/v1` file without evidence or secret values.
+- [ ] `kona scan --baseline PATH` suppresses only matching fingerprints,
+  reports suppression/stale counts, and still fails on newly introduced risks.
+- [ ] The standalone scan Action accepts a workspace-relative baseline and
+  exposes the number of suppressed findings without weakening path checks.
+- [ ] Local and cross-platform CI tests cover malformed baselines, secret
+  redaction, deterministic output, and the ratchet workflow.
+
+### Work order
+
+1. [ ] Fix entry accounting and add the focused regression test.
+2. [ ] Add the baseline module and CLI integration.
+3. [ ] Add Action support, documentation, and an ADR.
+4. [ ] Run the full release gate, publish the next verified release, and audit
+   the live `main` state.
