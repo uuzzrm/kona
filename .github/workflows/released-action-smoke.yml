@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Run published Kona major tag
         id: kona
-        uses: uuzzrm/kona@v0
+        uses: uuzzrm/kona@ce4eef29d647bc51a628308db9d62ae41c407985 # v0.9.0
         with:
           contract: examples/contracts/action-smoke.json
           artifact-name: kona-v0-smoke-${{ matrix.os }}
