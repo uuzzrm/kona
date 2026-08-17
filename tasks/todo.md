@@ -25,11 +25,11 @@
   Scanning correlation.
 - [x] Verify the installed wheel against a real high-severity finding.
 
-## Active v0.10 baseline adoption
+## v0.10 baseline adoption
 
-- [ ] Add deterministic `kona.baseline/v1` creation and validation.
-- [ ] Add explicit CLI baseline application and ratchet exit behavior.
-- [ ] Add workspace-relative baseline support to `scan/action.yml`.
-- [ ] Document the adoption workflow, stale baseline behavior, and privacy
+- [x] Add deterministic `kona.baseline/v1` creation and validation.
+- [x] Add explicit CLI baseline application and ratchet exit behavior.
+- [x] Add workspace-relative baseline support to `scan/action.yml`.
+- [x] Document the adoption workflow, stale baseline behavior, and privacy
   boundary.
-- [ ] Run local, package, cross-platform CI, and Action smoke verification.
+- [x] Run local, package, cross-platform CI, and Action smoke verification.
