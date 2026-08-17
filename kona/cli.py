@@ -28,7 +28,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     scan = commands.add_parser("scan", help="inspect a repository for deterministic Agent security risks")
     scan.add_argument("path", nargs="?", type=Path, default=Path("."), help="repository directory (default: current directory)")
-    scan.add_argument("--format", choices=("text", "json"), default="text")
+    scan.add_argument("--format", choices=("text", "json", "sarif"), default="text")
     scan.add_argument("--output", type=Path, help="write the rendered report without overwriting")
     scan.add_argument("--fail-on", choices=("critical", "high", "medium", "low", "info"), default="high")
 
