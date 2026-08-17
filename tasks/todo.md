@@ -24,3 +24,13 @@
 - [x] Harden Action workspace boundaries, artifact publication, and Code
   Scanning correlation.
 - [x] Verify the installed wheel against a real high-severity finding.
+
+## Active v0.10 baseline adoption
+
+- [ ] Fix duplicate directory-entry accounting and add a regression test.
+- [ ] Add deterministic `kona.baseline/v1` creation and validation.
+- [ ] Add explicit CLI baseline application and ratchet exit behavior.
+- [ ] Add workspace-relative baseline support to `scan/action.yml`.
+- [ ] Document the adoption workflow, stale baseline behavior, and privacy
+  boundary.
+- [ ] Run local, package, cross-platform CI, and Action smoke verification.
