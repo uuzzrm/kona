@@ -56,6 +56,19 @@ analysis result. Manufacturing a location would mislead reviewers.
   boundary and scan metadata.
 - The standalone Action must upload SARIF before enforcing a threshold.
 
+## v0.9.1 hardening
+
+The follow-up release keeps the same projection boundary while closing CI
+integration hazards found by independent review:
+
+- Action scan paths are existing workspace-relative directories, and SARIF
+  locations are prefixed back to the repository root when a subdirectory is
+  scanned.
+- Hidden SARIF artifact paths are explicitly included, and a failed scan
+  cannot upload a pre-existing report.
+- Code Scanning uploads accept an optional category and standard line-hash
+  correlation field; public examples pin Action references to immutable SHAs.
+
 ## Sources
 
 - OASIS, *Static Analysis Results Interchange Format (SARIF) Version 2.1.0*,
