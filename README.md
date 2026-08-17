@@ -147,7 +147,8 @@ permissions:
   contents: read
 
 steps:
-  - uses: uuzzrm/kona/scan@v0
+  - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+  - uses: uuzzrm/kona/scan@ce4eef29d647bc51a628308db9d62ae41c407985 # v0.9.0
     with:
       path: .
       fail-on: high
@@ -160,17 +161,21 @@ and grant the narrow permission required by GitHub:
 ```yaml
 permissions:
   contents: read
+  actions: read
   security-events: write
 
 steps:
-  - uses: uuzzrm/kona/scan@v0
+  - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+  - uses: uuzzrm/kona/scan@ce4eef29d647bc51a628308db9d62ae41c407985 # v0.9.0
     with:
       upload-sarif: "true"
+      category: kona-guard
 ```
 
 The SARIF file is a CI presentation adapter. The JSON `kona.findings/v1`
 report remains the authoritative result; contract assertions and AI advice are
-not converted into code-scanning alerts.
+not converted into code-scanning alerts. The examples pin both Actions to
+immutable commits; update the Kona commit when adopting a newer release.
 
 ## Verify Agent work
 
