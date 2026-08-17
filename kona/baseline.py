@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -20,6 +21,10 @@ _SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
 
 class BaselineError(ValueError):
     """Raised when a baseline cannot be trusted or safely written."""
+
+
+def _is_reparse_point(metadata: os.stat_result) -> bool:
+    return bool(getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
 
 
 @dataclass(frozen=True)
@@ -67,23 +72,37 @@ def _parse(payload: Any) -> Baseline:
 
 def _read(path: Path) -> bytes:
     candidate = path.expanduser()
-    if candidate.is_symlink():
-        raise BaselineError(f"refusing to read symlinked baseline: {path}")
     try:
         before = candidate.stat(follow_symlinks=False)
     except OSError as error:
         raise BaselineError(f"could not inspect baseline: {path}") from error
-    if not stat.S_ISREG(before.st_mode):
+    if not stat.S_ISREG(before.st_mode) or _is_reparse_point(before):
         raise BaselineError(f"baseline must be a regular file: {path}")
     if before.st_size > _MAX_BASELINE_BYTES:
         raise BaselineError(f"baseline exceeds size limit: {_MAX_BASELINE_BYTES}")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
     try:
-        with candidate.open("rb") as handle:
+        descriptor = os.open(candidate, flags | no_follow)
+    except OSError as error:
+        raise BaselineError(f"could not safely open baseline: {path}") from error
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or _is_reparse_point(opened):
+            raise BaselineError(f"baseline must be a regular file: {path}")
+        if opened.st_size > _MAX_BASELINE_BYTES:
+            raise BaselineError(f"baseline exceeds size limit: {_MAX_BASELINE_BYTES}")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
             data = handle.read(_MAX_BASELINE_BYTES + 1)
         after = candidate.stat(follow_symlinks=False)
     except OSError as error:
-        raise BaselineError(f"could not read baseline: {path}") from error
-    if len(data) > _MAX_BASELINE_BYTES or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise BaselineError(f"could not safely read baseline: {path}") from error
+    finally:
+        os.close(descriptor)
+    before_state = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+    opened_state = (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
+    after_state = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    if len(data) > _MAX_BASELINE_BYTES or before_state != opened_state or opened_state != after_state:
         raise BaselineError(f"baseline changed during read: {path}")
     return data
 
