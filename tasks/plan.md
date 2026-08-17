@@ -144,11 +144,13 @@ and expose that projection through a separate `scan/action.yml` entry point.
   exit code and leaves the existing contract Action backward-compatible.
 - [x] README, ADR, tests, package verification, and cross-platform CI coverage
   reflect the new adoption path.
-- [ ] The PR is merged and live `main` state is verified.
+- [x] The v0.9.0 PR is merged, v0.9.1 hardening is on `main`, and the live
+  `main` state is verified.
 
 ### Work order
 
 1. [x] Add the renderer and focused scanner/CLI tests.
 2. [x] Add the standalone Action and clean/rejected smoke coverage.
 3. [x] Document the SARIF projection boundary and official sources.
-4. [ ] Run independent review, full verification, PR, merge, and live audit.
+4. [x] Run independent review, full verification, release, merge/direct-main
+   push, and live audit.
