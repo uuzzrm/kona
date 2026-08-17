@@ -83,21 +83,21 @@ runs:
             ;;
         esac
         scan_values=$(python -c 'import os, sys; from pathlib import Path
-workspace = Path(os.environ["KONA_WORKSPACE"]).resolve()
-raw = os.environ["KONA_SCAN_PATH"]
-if not raw or raw.startswith(("/", "\\")) or (len(raw) >= 2 and raw[1] == ":") or any(char in raw for char in "\r\n\t"):
-    raise SystemExit("path must be workspace-relative")
-candidate = workspace / raw
-if candidate.is_symlink():
-    raise SystemExit("path must not be a symlink")
-try:
-    resolved = candidate.resolve(strict=True)
-    if not resolved.is_dir():
-        raise OSError
-    relative = resolved.relative_to(workspace)
-except (OSError, RuntimeError, ValueError):
-    raise SystemExit("path must be an existing directory inside the workspace")
-sys.stdout.write(str(resolved) + "\t" + (relative.as_posix() if relative.parts else ""))')
+        workspace = Path(os.environ["KONA_WORKSPACE"]).resolve()
+        raw = os.environ["KONA_SCAN_PATH"]
+        if not raw or raw.startswith(("/", "\\")) or (len(raw) >= 2 and raw[1] == ":") or any(char in raw for char in "\r\n\t"):
+            raise SystemExit("path must be workspace-relative")
+        candidate = workspace / raw
+        if candidate.is_symlink():
+            raise SystemExit("path must not be a symlink")
+        try:
+            resolved = candidate.resolve(strict=True)
+            if not resolved.is_dir():
+                raise OSError
+            relative = resolved.relative_to(workspace)
+        except (OSError, RuntimeError, ValueError):
+            raise SystemExit("path must be an existing directory inside the workspace")
+        sys.stdout.write(str(resolved) + "\t" + (relative.as_posix() if relative.parts else ""))')
         validation_code=$?
         if [ "$validation_code" -ne 0 ]; then
           echo "path must be an existing workspace-relative directory" >&2
