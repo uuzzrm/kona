@@ -293,7 +293,8 @@ def render_sarif_report(report: dict[str, Any], *, path_prefix: str = "") -> str
         if path_prefix:
             if not isinstance(path, str):
                 continue
-            path = f"{path_prefix.rstrip('/\\')}/{path}"
+            normalized_prefix = path_prefix.rstrip("/\\")
+            path = f"{normalized_prefix}/{path}"
         uri = _sarif_uri(path)
         line = location.get("line")
         if uri is None or isinstance(line, bool) or not isinstance(line, int) or line < 1:
