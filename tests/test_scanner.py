@@ -185,6 +185,27 @@ class ConfigurationScannerTests(ScannerTestCase):
 
         self.assertNotIn("CFG003", self.rule_ids(result))
 
+    def test_sarif_projection_has_stable_rules_locations_and_no_secret_evidence(self) -> None:
+        token = "ghp_" + "R" * 36
+        self.write("config.py", f'TOKEN = "{token}"\n')
+        report = self.scan()
+        rendered = render_scan_report(report, format="sarif")
+        sarif = json.loads(rendered)
+        run = sarif["runs"][0]
+        result = run["results"][0]
+        self.assertEqual(sarif["version"], "2.1.0")
+        self.assertEqual(result["ruleId"], "SEC002")
+        self.assertEqual(result["level"], "error")
+        self.assertEqual(result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"], "config.py")
+        self.assertEqual(result["locations"][0]["physicalLocation"]["region"]["startLine"], 1)
+        self.assertNotIn(token, rendered)
+        self.assertNotIn("evidence", rendered)
+        self.assertNotIn(str(self.root), rendered)
+
+    def test_sarif_projection_is_deterministic_for_clean_scan(self) -> None:
+        self.write("README.md", "safe\n")
+        self.assertEqual(render_scan_report(self.scan(), format="sarif"), render_scan_report(self.scan(), format="sarif"))
+
 
 class AgentInstructionScannerTests(ScannerTestCase):
     def test_does_not_flag_instruction_forbidding_safeguard_bypass(self) -> None:
@@ -262,6 +283,17 @@ class ScanThresholdTests(ScannerTestCase):
 
 
 class ScanCliTests(ScannerTestCase):
+    def test_cli_sarif_format_and_threshold_exit_code(self) -> None:
+        self.write("settings.py", 'TOKEN = "' + "ghp_" + "S" * 36 + '"\n')
+        completed = subprocess.run(
+            [sys.executable, "-m", "kona", "scan", str(self.root), "--format", "sarif", "--fail-on", "high"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        sarif = json.loads(completed.stdout)
+        self.assertEqual(sarif["version"], "2.1.0")
+        self.assertEqual(sarif["runs"][0]["results"][0]["ruleId"], "SEC002")
+
     def test_report_identifies_non_current_target_without_absolute_path(self) -> None:
         report = self.scan()
         self.assertEqual(report["scan"]["target"], self.root.name)
