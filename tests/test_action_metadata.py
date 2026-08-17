@@ -14,10 +14,17 @@ class ScanActionMetadataTests(unittest.TestCase):
         self.assertIn("uses: github/codeql-action/upload-sarif@f3712979fa5f215279b101dd0a2e3bdfb4353324", action)
         self.assertLess(action.index("Upload SARIF artifact"), action.index("Enforce Kona scan"))
         self.assertLess(action.index("Upload to GitHub Code Scanning"), action.index("Enforce Kona scan"))
+        self.assertIn("include-hidden-files: true", action)
+        self.assertIn("--sarif-prefix", action)
+        self.assertIn("relative_to(workspace)", action)
+        self.assertIn("path must not be a symlink", action)
+        self.assertIn('[ "$code" -le 1 ] && [ -f "$KONA_SARIF_PATH" ]', action)
 
     def test_action_defaults_to_artifact_only_and_exposes_threshold_outputs(self) -> None:
         action = (ROOT / "scan" / "action.yml").read_text(encoding="utf-8")
         self.assertIn('default: "false"', action)
+        self.assertIn("Optional Code Scanning analysis category", action)
+        self.assertIn("category: ${{ inputs.category }}", action)
         self.assertIn("Number of findings represented in the SARIF projection.", action)
         self.assertIn("sarif-path must not contain line breaks", action)
         self.assertIn("value: ${{ steps.scan.outputs.exit-code }}", action)
