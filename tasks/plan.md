@@ -1,4 +1,4 @@
-# Implementation Plan: Kona Evidence Contracts v2
+# Implementation Plan: Kona Guard CI Scan Projection
 
 ## Overview
 
@@ -127,3 +127,28 @@ evaluates bounded assertions, and emits JSON plus Markdown evidence.
 - Existing v1 behavior remains covered.
 - Local tests, compile, package, Skill validators, contract smoke tests, and CI pass.
 - The PR is merged and the live `main` state is checked by `mergedAt` and commit SHA.
+
+## Next increment: SARIF and standalone scan Action
+
+The v2 contract plan above is historical and complete. The active plan is to
+project only location-bearing deterministic scanner findings into SARIF 2.1.0
+and expose that projection through a separate `scan/action.yml` entry point.
+
+### Acceptance criteria
+
+- [x] `kona scan --format sarif` emits valid SARIF with stable rule IDs,
+  levels, relative locations, and deterministic partial fingerprints.
+- [x] SARIF never contains secret evidence, absolute paths, contract results,
+  or AI advisory output; `kona.findings/v1` JSON remains authoritative.
+- [x] The standalone scan Action uploads SARIF before enforcing the threshold
+  exit code and leaves the existing contract Action backward-compatible.
+- [x] README, ADR, tests, package verification, and cross-platform CI coverage
+  reflect the new adoption path.
+- [ ] The PR is merged and live `main` state is verified.
+
+### Work order
+
+1. [x] Add the renderer and focused scanner/CLI tests.
+2. [x] Add the standalone Action and clean/rejected smoke coverage.
+3. [x] Document the SARIF projection boundary and official sources.
+4. [ ] Run independent review, full verification, PR, merge, and live audit.
