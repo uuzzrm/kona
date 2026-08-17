@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import stat
 from typing import Any
+from urllib.parse import quote
 
 from . import __version__
 from .redaction import redact_text
@@ -249,6 +250,17 @@ def threshold_exit_code(report: dict[str, Any], fail_on: str = "high") -> int:
     return 1 if any(_SEVERITY[item["severity"]] >= _SEVERITY[fail_on] for item in report["findings"]) else 0
 
 
+def _sarif_uri(path: object) -> str | None:
+    if not isinstance(path, str) or not path or "\x00" in path:
+        return None
+    if path.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", path):
+        return None
+    parts = path.replace("\\", "/").split("/")
+    if any(part in {".", ".."} for part in parts):
+        return None
+    return quote(path.replace("\\", "/"), safe="/!$&'()*+,-.:;=@_~")
+
+
 def render_sarif_report(report: dict[str, Any]) -> str:
     """Render location-bearing deterministic findings as SARIF 2.1.0.
 
@@ -270,13 +282,26 @@ def render_sarif_report(report: dict[str, Any]) -> str:
         )
     results = []
     for item in report.get("findings", []):
-        location = item["location"]
+        if not isinstance(item, dict):
+            continue
+        rule_id = item.get("rule_id")
+        severity = item.get("severity")
+        location = item.get("location")
+        fingerprint = item.get("fingerprint")
+        if rule_id not in _SARIF_RULES or severity not in _SEVERITY or not isinstance(location, dict):
+            continue
+        uri = _sarif_uri(location.get("path"))
+        line = location.get("line")
+        if uri is None or isinstance(line, bool) or not isinstance(line, int) or line < 1:
+            continue
+        if not isinstance(fingerprint, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", fingerprint):
+            continue
         result = {
-            "ruleId": item["rule_id"],
-            "level": "error" if item["severity"] in {"critical", "high"} else "warning" if item["severity"] == "medium" else "note",
-            "message": {"text": item["message"]},
-            "locations": [{"physicalLocation": {"artifactLocation": {"uri": location["path"]}, "region": {"startLine": location["line"]}}}],
-            "partialFingerprints": {"konaFinding": item["fingerprint"].removeprefix("sha256:")},
+            "ruleId": rule_id,
+            "level": "error" if severity in {"critical", "high"} else "warning" if severity == "medium" else "note",
+            "message": {"text": _SARIF_RULES[rule_id][1]},
+            "locations": [{"physicalLocation": {"artifactLocation": {"uri": uri}, "region": {"startLine": line}}}],
+            "partialFingerprints": {"konaFinding": fingerprint.removeprefix("sha256:")},
         }
         results.append(result)
     scan = report["scan"]
