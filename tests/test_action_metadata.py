@@ -30,6 +30,18 @@ class ScanActionMetadataTests(unittest.TestCase):
         self.assertIn("value: ${{ steps.scan.outputs.exit-code }}", action)
         self.assertIn("value: ${{ steps.scan.outputs.findings }}", action)
 
+    def test_action_supports_workspace_relative_baseline_without_weakening_scan(self) -> None:
+        action = (ROOT / "scan" / "action.yml").read_text(encoding="utf-8")
+        self.assertIn("kona.baseline/v1", action)
+        self.assertIn("baseline-suppressed", action)
+        self.assertIn("value: ${{ steps.scan.outputs.baseline-suppressed }}", action)
+        self.assertIn('KONA_BASELINE: ${{ inputs.baseline }}', action)
+        self.assertIn("baseline must be workspace-relative", action)
+        self.assertIn("baseline must not be a symlink", action)
+        self.assertIn("baseline_resolved.relative_to(workspace)", action)
+        self.assertIn('json.dumps({"scan_root"', action)
+        self.assertIn('json.load(sys.stdin)["baseline"]', action)
+
 
 if __name__ == "__main__":
     unittest.main()
