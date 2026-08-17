@@ -35,6 +35,19 @@ _PLACEHOLDER = re.compile(r"(?i)^(?:example|dummy|changeme|replace[-_]?me|test|p
 _USES = re.compile(r"\buses\s*:\s*['\"]?([^\s'\"]+)['\"]?")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")
 
+_SARIF_RULES: dict[str, tuple[str, str, str]] = {
+    "SEC001": ("Private key material", "A private-key PEM header is present.", "Revoke and remove the private key from the repository and its history."),
+    "SEC002": ("Provider credential", "A provider-specific credential shape is present.", "Revoke the credential and load its replacement from a secret store."),
+    "SEC003": ("Hard-coded credential assignment", "A sensitive variable is assigned a non-placeholder value.", "Move the value to an environment variable or secret store and rotate it."),
+    "CFG001": ("Broad workflow write permission", "The workflow requests write-all permissions.", "Declare only the minimum required permissions."),
+    "CFG002": ("Privileged pull request trigger", "pull_request_target runs in the base repository security context.", "Avoid executing pull-request-controlled content in this workflow."),
+    "CFG003": ("Mutable Action reference", "A third-party Action is not pinned to a full commit SHA.", "Pin the Action to a reviewed 40-character commit SHA."),
+    "AGT001": ("Instruction exposes credentials", "An Agent instruction requests handling credentials through an unsafe side effect.", "Remove the instruction and keep credentials outside Agent-visible outputs."),
+    "AGT002": ("Instruction bypasses a safeguard", "An Agent instruction requests bypassing a verification or security control.", "Require the control and document any narrowly scoped exception."),
+    "DEP001": ("Dependency lockfile missing", "A dependency-bearing project has no nearby recognized lockfile.", "Commit the lockfile used by this package root."),
+    "DEP002": ("Floating remote dependency", "A remote Python dependency is not pinned to an immutable revision.", "Pin the dependency to an immutable commit and verify its integrity."),
+}
+
 
 def _is_reparse_point(metadata: os.stat_result) -> bool:
     return bool(getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
@@ -236,9 +249,67 @@ def threshold_exit_code(report: dict[str, Any], fail_on: str = "high") -> int:
     return 1 if any(_SEVERITY[item["severity"]] >= _SEVERITY[fail_on] for item in report["findings"]) else 0
 
 
+def render_sarif_report(report: dict[str, Any]) -> str:
+    """Render location-bearing deterministic findings as SARIF 2.1.0.
+
+    This is a presentation adapter. The canonical JSON report retains the
+    scanner's complete trust boundary and remains authoritative.
+    """
+
+    rules = []
+    for rule_id, (title, message, remediation) in _SARIF_RULES.items():
+        rules.append(
+            {
+                "id": rule_id,
+                "name": rule_id,
+                "shortDescription": {"text": title},
+                "fullDescription": {"text": message},
+                "help": {"text": remediation},
+                "properties": {"category": "kona-deterministic"},
+            }
+        )
+    results = []
+    for item in report.get("findings", []):
+        location = item["location"]
+        result = {
+            "ruleId": item["rule_id"],
+            "level": "error" if item["severity"] in {"critical", "high"} else "warning" if item["severity"] == "medium" else "note",
+            "message": {"text": item["message"]},
+            "locations": [{"physicalLocation": {"artifactLocation": {"uri": location["path"]}, "region": {"startLine": location["line"]}}}],
+            "partialFingerprints": {"konaFinding": item["fingerprint"].removeprefix("sha256:")},
+        }
+        results.append(result)
+    scan = report["scan"]
+    summary = report["summary"]
+    sarif = {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "Kona Guard", "version": report["tool"]["version"], "informationUri": "https://github.com/uuzzrm/kona", "rules": rules}},
+                "results": results,
+                "properties": {
+                    "konaSchema": report["schema"],
+                    "verdict": summary["verdict"],
+                    "complete": scan["complete"],
+                    "offline": scan["offline"],
+                    "readOnly": scan["read_only"],
+                    "authenticated": scan["authenticated"],
+                    "filesExamined": scan["files_examined"],
+                    "entriesExamined": scan["entries_examined"],
+                    "skippedCount": len(scan.get("skipped", [])),
+                },
+            }
+        ],
+    }
+    return json.dumps(sarif, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+
+
 def render_scan_report(report: dict[str, Any], *, format: str = "text") -> str:
     if format == "json":
         return json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    if format == "sarif":
+        return render_sarif_report(report)
     if format != "text":
         raise ScanError(f"unknown scan report format: {format}")
     lines = ["Kona Project Scan", "Mode: deterministic, offline, read-only", ""]
