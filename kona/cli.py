@@ -31,6 +31,7 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--format", choices=("text", "json", "sarif"), default="text")
     scan.add_argument("--output", type=Path, help="write the rendered report without overwriting")
     scan.add_argument("--fail-on", choices=("critical", "high", "medium", "low", "info"), default="high")
+    scan.add_argument("--sarif-prefix", default="", help="repository-relative path prefix for SARIF locations")
 
     explain = commands.add_parser("explain", help="optionally send redacted findings, never source, for advisory AI explanation")
     explain.add_argument("path", nargs="?", type=Path, default=Path("."))
@@ -139,7 +140,7 @@ def _run(args: argparse.Namespace) -> int:
 def _scan(args: argparse.Namespace) -> int:
     try:
         report = scan_repository(args.path, ScanPolicy())
-        rendered = render_scan_report(report, format=args.format)
+        rendered = render_scan_report(report, format=args.format, sarif_prefix=args.sarif_prefix)
         if args.output is not None:
             output = args.output.expanduser()
             if output.exists() or output.is_symlink():
