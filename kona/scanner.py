@@ -314,6 +314,8 @@ def render_sarif_report(report: dict[str, Any], *, path_prefix: str = "") -> str
         results.append(result)
     scan = report["scan"]
     summary = report["summary"]
+    baseline = report.get("baseline", {})
+    baseline_applied = isinstance(baseline, dict) and baseline.get("applied") is True
     sarif = {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -331,6 +333,9 @@ def render_sarif_report(report: dict[str, Any], *, path_prefix: str = "") -> str
                     "filesExamined": scan["files_examined"],
                     "entriesExamined": scan["entries_examined"],
                     "skippedCount": len(scan.get("skipped", [])),
+                    "baselineApplied": baseline_applied,
+                    "baselineSuppressed": summary.get("baseline_suppressed", 0) if baseline_applied else 0,
+                    "baselineUnmatched": summary.get("baseline_unmatched", 0) if baseline_applied else 0,
                 },
             }
         ],
@@ -351,5 +356,8 @@ def render_scan_report(report: dict[str, Any], *, format: str = "text", sarif_pr
         lines.extend([f"{item['severity'].upper():8} {item['rule_id']}  {item['title']}", f"         {location['path']}:{location['line']}", f"         {item['message']}", f"         Evidence: {item['evidence']['preview']}", f"         Fix: {item['remediation']}", ""])
     summary = report["summary"]
     skipped = report["scan"].get("skipped", [])
-    lines.extend(["Summary", f"  target: {report['scan']['target']}", f"  files examined: {report['scan']['files_examined']}", f"  findings: {summary['critical']} critical, {summary['high']} high, {summary['medium']} medium, {summary['low']} low, {summary['info']} info", f"  skipped/inventoried: {len(skipped)}", "  scan complete: yes", f"  verdict: {summary['verdict']}", "", "Generated directories and binary files listed in JSON are inventoried but not rule-scanned.", "This result covers enabled deterministic rules; it is not proof that the repository has no vulnerabilities."])
+    lines.extend(["Summary", f"  target: {report['scan']['target']}", f"  files examined: {report['scan']['files_examined']}", f"  findings: {summary['critical']} critical, {summary['high']} high, {summary['medium']} medium, {summary['low']} low, {summary['info']} info", f"  skipped/inventoried: {len(skipped)}", "  scan complete: yes", f"  verdict: {summary['verdict']}"])
+    if isinstance(report.get("baseline"), dict) and report["baseline"].get("applied") is True:
+        lines.append(f"  baseline: suppressed {summary.get('baseline_suppressed', 0)}, stale {summary.get('baseline_unmatched', 0)}")
+    lines.extend(["", "Generated directories and binary files listed in JSON are inventoried but not rule-scanned.", "This result covers enabled deterministic rules; it is not proof that the repository has no vulnerabilities."])
     return "\n".join(lines) + "\n"
