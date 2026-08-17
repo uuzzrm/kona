@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     if source_archives:
         with tarfile.open(source_archives[-1], "r:gz") as archive:
             source_names = set(archive.getnames())
-        required_assets = ("schemas/contract.schema.json", "skills/kona-capture/SKILL.md", "examples/contracts/README.md", "action.yml")
+        required_assets = ("schemas/contract.schema.json", "skills/kona-capture/SKILL.md", "examples/contracts/README.md", "action.yml", "scan/action.yml")
         for asset in required_assets:
             if not any(name.endswith(asset) for name in source_names):
                 raise RuntimeError(f"source distribution is missing {asset}")
@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run([str(installed_python), "-m", "kona", "--help"], cwd=temporary, env=environment, check=True)
         subprocess.run([str(installed_python), "-m", "kona", "contract", "templates", "--json"], cwd=temporary, env=environment, check=True)
         subprocess.run([str(installed_python), "-m", "kona", "scan", ".", "--format", "json"], cwd=temporary, env=environment, check=True)
+        subprocess.run([str(installed_python), "-m", "kona", "scan", ".", "--format", "sarif"], cwd=temporary, env=environment, check=True)
         subprocess.run([str(installed_python), "-m", "kona", "explain", ".", "--provider", "deepseek", "--model", "deepseek-v4-pro", "--preview"], cwd=temporary, env=environment, check=True)
         subprocess.run(
             [str(installed_python), "-c", f"import kona; assert kona.__version__ == '{__version__}'"],
